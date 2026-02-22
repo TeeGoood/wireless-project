@@ -12,11 +12,22 @@ firebase_admin.initialize_app(
     },
 )
 
-print("Connected")
 
-ref = db.reference("users/user1")
+def push(data):
+    ref = db.reference("data")
+    ref.push(data)
 
-ref.set({"name": "Alice", "age": 30})
 
-data = ref.get()
-print(data)
+def get(ref_path):
+    ref = db.reference(ref_path)
+    return ref.get()
+
+
+def set(ref_path, data):
+    ref = db.reference(ref_path)
+    ref.set(data)
+
+
+def update(ref_path, data):
+    ref = db.reference(ref_path)
+    ref.update(data)
