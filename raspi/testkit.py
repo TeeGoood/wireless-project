@@ -128,7 +128,10 @@ def print_event(event: dict) -> None:
             print(f"\n{_ts()} {red('✗ Connection rejected')} by {cyan(p.get('car_id','?'))}")
 
         case "disconnected":
-            print(f"\n{_ts()} {yellow('↯ Disconnected')}")
+            print(f"\n{_ts()} {yellow('↯ Disconnected')} (you initiated)")
+
+        case "peerDisconnected":
+            print(f"\n{_ts()} {red('↯ Peer disconnected')}  {cyan(p.get('car_id','?'))} closed the connection")
 
         case "messageReceived":
             kind = p.get("kind", "?")

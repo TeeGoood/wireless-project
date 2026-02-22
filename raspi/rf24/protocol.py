@@ -12,6 +12,7 @@ Message type map
   0x03  CONN_REQUEST     Request a P2P connection
   0x04  CONN_ACCEPT      Accept a pending connection
   0x05  CONN_REJECT      Reject a pending connection
+  0x06  CONN_CLOSE       Graceful disconnect notification (tells peer to drop state)
   0x07  INFO             One metadata field; data[0]=field_id, data[1:]=value
   0x10  PING             Round-trip probe; data[0:2]=seq (big-endian uint16)
   0x11  PONG             Reply to PING; same data layout
@@ -39,6 +40,7 @@ class MsgType(IntEnum):
     CONN_REQUEST = 0x03
     CONN_ACCEPT  = 0x04
     CONN_REJECT  = 0x05
+    CONN_CLOSE   = 0x06
     INFO         = 0x07
     PING         = 0x10
     PONG         = 0x11
@@ -99,6 +101,10 @@ def make_conn_accept(from_id: bytes) -> bytes:
 
 def make_conn_reject(from_id: bytes) -> bytes:
     return encode(MsgType.CONN_REJECT, from_id)
+
+
+def make_conn_close(from_id: bytes) -> bytes:
+    return encode(MsgType.CONN_CLOSE, from_id)
 
 
 def make_info(from_id: bytes, field_id: int, value: str) -> bytes:

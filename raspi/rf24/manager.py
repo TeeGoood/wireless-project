@@ -52,6 +52,7 @@ from .protocol import (
     decode,
     make_beacon,
     make_conn_accept,
+    make_conn_close,
     make_conn_reject,
     make_conn_request,
     make_honk,
@@ -247,10 +248,17 @@ class RF24Manager:
         logger.info("Connection rejected ← %s", car_id_hex)
 
     def handle_disconnect(self) -> None:
-        """Tear down the active connection."""
+        """Tear down the active connection and notify the peer."""
         with self._state_lock:
+            peer = self._peer
             self._state = ConnectionState.IDLE
         self._peer = None
+
+        # Tell the other car first so it can drop its own state immediately.
+        # Do this before clearing peer so we still have the address.
+        if peer and self._driver:
+            self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
+
         self._emit("disconnected", {})
 
     # ── Messaging (requires active connection) ────────────────────────────────
@@ -308,6 +316,7 @@ class RF24Manager:
             MsgType.CONN_REQUEST: lambda: self._rx_conn_request(from_hex),
             MsgType.CONN_ACCEPT:  lambda: self._rx_conn_accept(from_hex),
             MsgType.CONN_REJECT:  lambda: self._rx_conn_reject(from_hex),
+            MsgType.CONN_CLOSE:   lambda: self._rx_conn_close(from_hex),
             MsgType.INFO:         lambda: self._rx_info(from_hex, pkt),
             MsgType.PING:         lambda: self._rx_ping(from_hex, pkt),
             MsgType.PONG:         lambda: self._rx_pong(from_hex, pkt),
@@ -367,6 +376,15 @@ class RF24Manager:
                 self._state = ConnectionState.IDLE
                 self._peer = None
         self._emit("connectionRejected", {"car_id": from_hex})
+
+    def _rx_conn_close(self, from_hex: str) -> None:
+        with self._state_lock:
+            if self._peer != from_hex:
+                return  # Not our current peer – ignore stale packet
+            self._state = ConnectionState.IDLE
+        self._peer = None
+        self._emit("peerDisconnected", {"car_id": from_hex})
+        logger.info("Peer disconnected ← %s", from_hex)
         logger.info("Connection rejected ← %s", from_hex)
 
     def _rx_info(self, from_hex: str, pkt: RFPacket) -> None:
