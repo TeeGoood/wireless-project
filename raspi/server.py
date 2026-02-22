@@ -1,12 +1,11 @@
 """
 FastAPI server – HTTP static files + WebSocket event bus for RF24 communication.
 
-WebSocket endpoint: ws://<host>:8000/ws
+WebSocket endpoints:
+  ws://<host>:8000/ws             – RF24 event bus (car-to-car messages)
+  ws://<host>:8000/ws/{username}  – Firebase user session
 
-Every message is a JSON object with the shape:
-    { "type": "<event>", "payload": { ... } }
-
-See rf24/schema.py for the full list of event types.
+See rf24/schema.py for the RF24 event type reference.
 """
 
 from __future__ import annotations
@@ -16,9 +15,12 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
+import pydantic
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
+import firebase
 from rf24.manager import RF24Manager
 
 logging.basicConfig(
@@ -41,20 +43,16 @@ connected_clients: list[WebSocket] = []
 async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     manager.start(loop, event_queue)
-
-    forwarder = asyncio.create_task(
-        _event_forwarder(), name="rf24-event-forwarder"
-    )
+    forwarder = asyncio.create_task(_event_forwarder(), name="rf24-event-forwarder")
     logger.info("Server started")
-
     yield
-
     forwarder.cancel()
     manager.stop()
     logger.info("Server stopped")
 
 
 app = FastAPI(title="Car RF24 Gateway", lifespan=lifespan)
+app.mount("/web", StaticFiles(directory=".", html=True), name="static")
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -65,7 +63,21 @@ async def root():
     return FileResponse("index.html")
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
+class User(pydantic.BaseModel):
+    name: str
+
+
+@app.post("/users/")
+async def create_user(data: User):
+    return firebase.push("users", {"name": data.name})
+
+
+@app.get("/users/")
+async def get_users():
+    return firebase.get("users")
+
+
+# ── WebSocket – RF24 event bus ────────────────────────────────────────────────
 
 
 @app.websocket("/ws")
@@ -74,7 +86,6 @@ async def websocket_endpoint(ws: WebSocket):
     connected_clients.append(ws)
     logger.info("WebSocket client connected (%d total)", len(connected_clients))
 
-    # Send initial state snapshot
     await _send(ws, {
         "type": "init",
         "payload": {
@@ -92,7 +103,6 @@ async def websocket_endpoint(ws: WebSocket):
             except json.JSONDecodeError:
                 await _send(ws, _err("Invalid JSON"))
                 continue
-
             await _handle_client_event(ws, event)
 
     except WebSocketDisconnect:
@@ -103,60 +113,59 @@ async def websocket_endpoint(ws: WebSocket):
         logger.info("WebSocket client disconnected (%d remaining)", len(connected_clients))
 
 
+# ── WebSocket – Firebase user session ─────────────────────────────────────────
+
+
+@app.websocket("/ws/{username}")
+async def websocket_user_endpoint(websocket: WebSocket, username: str):
+    await websocket.accept()
+    try:
+        counter = 0
+        while True:
+            await asyncio.sleep(1)
+            counter += 1
+            await websocket.send_text(f"{username} message #{counter}")
+    except WebSocketDisconnect:
+        logger.info("%s disconnected", username)
+
+
+# ── RF24 event handling ───────────────────────────────────────────────────────
+
+
 async def _handle_client_event(ws: WebSocket, event: dict) -> None:
     t = event.get("type")
     p = event.get("payload", {})
 
     match t:
-        # ── Config ────────────────────────────────────────────────────────────
         case "changeInfo":
             manager.handle_change_info(p)
-
         case "getInfo":
             await _broadcast({"type": "infoUpdated", "payload": manager.get_info()})
-
-        # ── Discovery ─────────────────────────────────────────────────────────
         case "scan":
             manager.handle_scan()
-
         case "beacon":
             manager.handle_beacon()
-
         case "getNearby":
             await _broadcast({
                 "type": "nearbyList",
                 "payload": {"cars": manager.get_nearby()},
             })
-
-        # ── Connection lifecycle ───────────────────────────────────────────────
         case "connect":
-            car_id = p.get("car_id", "")
-            manager.handle_connect(car_id)
-
+            manager.handle_connect(p.get("car_id", ""))
         case "acceptConnection":
-            car_id = p.get("car_id", "")
-            manager.handle_accept_connection(car_id)
-
+            manager.handle_accept_connection(p.get("car_id", ""))
         case "rejectConnection":
-            car_id = p.get("car_id", "")
-            manager.handle_reject_connection(car_id)
-
+            manager.handle_reject_connection(p.get("car_id", ""))
         case "disconnect":
             manager.handle_disconnect()
-
-        # ── Messaging ─────────────────────────────────────────────────────────
         case "sendText":
             manager.handle_send_text(str(p.get("text", "")))
-
         case "sendSound":
             manager.handle_send_sound(int(p.get("sound_id", 0)))
-
         case "sendHonk":
             manager.handle_send_honk()
-
         case "sendPing":
             manager.handle_send_ping()
-
         case _:
             logger.warning("Unknown event type: %s", t)
             await _send(ws, _err(f"Unknown event type: {t!r}"))
@@ -198,4 +207,4 @@ def _err(message: str) -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
