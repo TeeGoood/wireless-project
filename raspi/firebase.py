@@ -13,8 +13,8 @@ firebase_admin.initialize_app(
 )
 
 
-def push(data):
-    ref = db.reference("data")
+def push(ref_path, data):
+    ref = db.reference(ref_path)
     ref.push(data)
 
 
