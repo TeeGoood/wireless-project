@@ -9,9 +9,9 @@ Every packet is exactly 32 bytes:
 Message type map
 ----------------
   0x01  BEACON           Broadcast presence; data = plate (≤26 bytes, null-padded)
-  0x03  CONN_REQUEST     Request a P2P connection
+  0x03  CONN_REQUEST     Request a P2P connection; data[0:2]=nonce (2-byte random)
   0x04  CONN_ACCEPT      Accept a pending connection
-  0x05  CONN_REJECT      Reject a pending connection
+  0x05  CONN_REJECT      Reject a pending connection; data[0:2]=nonce echoed from request
   0x06  CONN_CLOSE       Graceful disconnect notification (tells peer to drop state)
   0x07  INFO             One metadata field; data[0]=field_id, data[1:]=value
   0x10  PING             Round-trip probe; data[0:2]=seq (big-endian uint16)
@@ -91,16 +91,29 @@ def make_beacon(from_id: bytes, plate: str) -> bytes:
     return encode(MsgType.BEACON, from_id, plate.encode()[:_DATA_LEN])
 
 
-def make_conn_request(from_id: bytes) -> bytes:
-    return encode(MsgType.CONN_REQUEST, from_id)
+def make_conn_request(from_id: bytes, nonce: bytes) -> bytes:
+    """CONN_REQUEST carrying a 2-byte random nonce.
+
+    The nonce lets the sender distinguish which request a CONN_REJECT refers to,
+    so a reject for a duplicate/stale attempt cannot cancel the live one.
+    """
+    assert len(nonce) == 2
+    return encode(MsgType.CONN_REQUEST, from_id, nonce)
 
 
 def make_conn_accept(from_id: bytes) -> bytes:
     return encode(MsgType.CONN_ACCEPT, from_id)
 
 
-def make_conn_reject(from_id: bytes) -> bytes:
-    return encode(MsgType.CONN_REJECT, from_id)
+def make_conn_reject(from_id: bytes, nonce: bytes = b"\x00\x00") -> bytes:
+    """CONN_REJECT echoing the nonce from the CONN_REQUEST being rejected."""
+    assert len(nonce) == 2
+    return encode(MsgType.CONN_REJECT, from_id, nonce)
+
+
+def parse_conn_nonce(pkt: RFPacket) -> bytes:
+    """Extract the 2-byte nonce from a CONN_REQUEST or CONN_REJECT packet."""
+    return bytes(pkt.data[:2])
 
 
 def make_conn_close(from_id: bytes) -> bytes:
