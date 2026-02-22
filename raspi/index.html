@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>FastAPI Interactive Page</title>
+
+    <style>
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: Arial, Helvetica, sans-serif;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(10px);
+        padding: 40px;
+        border-radius: 16px;
+        text-align: center;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        width: 320px;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      .counter {
+        font-size: 48px;
+        margin: 20px 0;
+        font-weight: bold;
+      }
+
+      button {
+        background: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 16px;
+        margin: 6px;
+        transition: 0.2s;
+      }
+
+      button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      .inc {
+        color: #16a34a;
+      }
+      .dec {
+        color: #dc2626;
+      }
+
+      .msg {
+        margin-top: 15px;
+        opacity: 0.85;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="card">
+      <h1>FastAPI Demo 🚀</h1>
+
+      <div id="counter" class="counter">0</div>
+
+      <div>
+        <button class="inc" onclick="change(1)">+ Increase</button>
+        <button class="dec" onclick="change(-1)">- Decrease</button>
+      </div>
+
+      <div class="msg" id="message">Click buttons to interact</div>
+    </div>
+
+    <script>
+      let count = 0;
+
+      function change(delta) {
+        count += delta;
+        document.getElementById("counter").innerText = count;
+
+        const msg = document.getElementById("message");
+
+        if (count > 0) {
+          msg.innerText = "Positive vibes 😎";
+        } else if (count < 0) {
+          msg.innerText = "Below zero 🧊";
+        } else {
+          msg.innerText = "Perfectly balanced ⚖️";
+        }
+      }
+    </script>
+  </body>
+</html>
