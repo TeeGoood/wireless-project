@@ -1,5 +1,7 @@
+import asyncio
+
 import pydantic
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 import firebase
@@ -14,13 +16,32 @@ class User(pydantic.BaseModel):
 
 @app.post("/users/")
 async def create_user(data: User):
-    print("Creating user:", data.name)
     return firebase.push("users", {"name": data.name})
 
 
 @app.get("/users/")
 async def get_users():
     return firebase.get("users")
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    username = ""
+    try:
+        username = await websocket.receive_text()
+        print(f"User connected: {username}")
+
+        await websocket.send_text(f"Hello {username}! Connected.")
+
+        counter = 0
+        while True:
+            await asyncio.sleep(5)  # interval
+            counter += 1
+            await websocket.send_text(f"{username} message #{counter}")
+
+    except WebSocketDisconnect:
+        print(f"{username} disconnected")
 
 
 if __name__ == "__main__":

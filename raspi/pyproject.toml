@@ -9,4 +9,5 @@ dependencies = [
     "firebase-admin>=7.1.0",
     "pyrebase4>=4.9.0",
     "uvicorn>=0.41.0",
+    "websockets>=16.0",
 ]
