@@ -1,0 +1,31 @@
+# systemd service unit for the TalkSig RF24 car server.
+#
+# The Makefile's `make service` target installs this automatically.
+# To install manually on the Pi:
+#   sudo cp talksig.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now talksig
+#
+# The Makefile substitutes {{PI_DIR}} with the actual deploy path.
+# If installing manually, replace {{PI_DIR}} with your path, e.g. /home/pi/talksig
+
+[Unit]
+Description=TalkSig – Car RF24 Communication Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory={{PI_DIR}}
+ExecStart=/home/pi/.local/bin/uv run python server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Give the SPI / GPIO devices a moment after boot
+ExecStartPre=/bin/sleep 2
+
+[Install]
+WantedBy=multi-user.target

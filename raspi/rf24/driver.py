@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from RF24 import RF24, RF24_PA_HIGH, RF24_1MBPS  # type: ignore[import]
+
     _RF24_AVAILABLE = True
 except ImportError:
     logger.warning(
@@ -47,10 +48,10 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-BROADCAST_ADDRESS: bytes = b"\xE7\xE7\xE7\xE7\xE7"  # shared beacon channel
-CE_PIN:    int = 25   # BCM GPIO 25
-CSN_PIN:   int = 0    # SPI CE0  (/dev/spidev0.0)
-CHANNEL:   int = 76   # RF channel (0-125 MHz offset from 2.4 GHz)
+BROADCAST_ADDRESS: bytes = b"\xe7\xe7\xe7\xe7\xe7"  # shared beacon channel
+CE_PIN: int = 25  # BCM GPIO 25
+CSN_PIN: int = 0  # SPI CE0  (/dev/spidev0.0)
+CHANNEL: int = 76  # RF channel (0-125 MHz offset from 2.4 GHz)
 PAYLOAD_SIZE: int = 32
 
 
@@ -74,8 +75,21 @@ class RF24Driver:
 
     Pipe layout
     -----------
+      Pipe 0 → car_id              (direct P2P channel – full 5-byte address,
+                                    no MSB-sharing constraint with Pipe 1)
       Pipe 1 → BROADCAST_ADDRESS   (shared beacon channel – all cars listen)
-      Pipe 2 → car_id              (direct P2P channel for this car)
+
+    WHY Pipe 0, not Pipe 2:
+      nRF24L01 pipes 2-5 share the upper 4 bytes of their address with Pipe 1
+      and only their LSB is individually programmable.  Using an arbitrary
+      MD5-derived address on Pipe 2 means the chip silently ignores the upper
+      4 bytes – the car ends up listening on a completely different address
+      than the one it advertised, so directed packets never arrive.
+      Pipe 0 has a fully independent 5-byte address.  The RF24 library also
+      caches the Pipe 0 address set via openReadingPipe(0, ...) and restores
+      it automatically on every startListening() call, so the standard
+      stopListening → openWritingPipe → write → startListening TX sequence
+      in send() correctly puts Pipe 0 back without any extra steps.
     """
 
     def __init__(self, car_id: bytes, on_receive: Callable[[bytes], None]) -> None:
@@ -121,12 +135,14 @@ class RF24Driver:
         r.setChannel(CHANNEL)
         r.setPALevel(RF24_PA_HIGH)
         r.setDataRate(RF24_1MBPS)
-        r.setAutoAck(False)          # Manual ACK – broadcast-compatible
+        r.setAutoAck(False)  # Manual ACK – broadcast-compatible
 
-        # Pipe 1: shared broadcast / beacon address
+        # Pipe 0: this car's unique direct address (full 5-byte, no MSB constraint).
+        # openReadingPipe(0, ...) caches the address internally so that
+        # startListening() restores it after every openWritingPipe() call.
+        r.openReadingPipe(0, self._car_id)
+        # Pipe 1: shared broadcast / beacon address (all cars listen here)
         r.openReadingPipe(1, BROADCAST_ADDRESS)
-        # Pipe 2: this car's direct address for P2P messages
-        r.openReadingPipe(2, self._car_id)
 
         r.startListening()
         logger.info("RF24 radio initialised | channel=%d", CHANNEL)
@@ -190,6 +206,8 @@ class RF24Driver:
             with self._lock:
                 r = self._radio
                 r.stopListening()
-                r.openReadingPipe(2, car_id)
+                # Re-open Pipe 0 to update both the hardware register and the
+                # library's internal cache used by startListening().
+                r.openReadingPipe(0, car_id)
                 r.startListening()
         logger.info("RF24 P2P address updated → %s", car_id.hex())
