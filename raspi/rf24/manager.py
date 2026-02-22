@@ -248,16 +248,29 @@ class RF24Manager:
         logger.info("Connection rejected ← %s", car_id_hex)
 
     def handle_disconnect(self) -> None:
-        """Tear down the active connection and notify the peer."""
+        """Cancel a pending connection request or tear down an active connection.
+
+        Works from both CONNECTING and CONNECTED states:
+          CONNECTING → sends CONN_REJECT so the remote car knows the attempt
+                       is cancelled before it has a chance to accept.
+          CONNECTED  → sends CONN_CLOSE as before.
+
+        This prevents the race where Car B accepts after Car A already gave up,
+        leaving Car B thinking it is connected and free to send messages.
+        """
         with self._state_lock:
-            peer = self._peer
+            state = self._state
+            peer  = self._peer
+            if state not in (ConnectionState.CONNECTING, ConnectionState.CONNECTED):
+                return
             self._state = ConnectionState.IDLE
         self._peer = None
 
-        # Tell the other car first so it can drop its own state immediately.
-        # Do this before clearing peer so we still have the address.
         if peer and self._driver:
-            self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
+            if state == ConnectionState.CONNECTED:
+                self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
+            else:  # CONNECTING – cancel before the other side has accepted
+                self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id))
 
         self._emit("disconnected", {})
 
@@ -371,11 +384,25 @@ class RF24Manager:
         logger.info("Connection accepted ↔ %s", from_hex)
 
     def _rx_conn_reject(self, from_hex: str) -> None:
+        # Determine which event to raise before releasing the lock.
+        event = None
         with self._state_lock:
+            if self._peer != from_hex:
+                return
             if self._state == ConnectionState.CONNECTING:
+                # Normal rejection: remote declined our request.
+                event = "connectionRejected"
                 self._state = ConnectionState.IDLE
-                self._peer = None
-        self._emit("connectionRejected", {"car_id": from_hex})
+            elif self._state == ConnectionState.CONNECTED:
+                # Race condition: we accepted, but the initiator cancelled
+                # before our CONN_ACCEPT arrived.  Treat it like a close.
+                event = "peerDisconnected"
+                self._state = ConnectionState.IDLE
+        if event is None:
+            return
+        self._peer = None
+        self._emit(event, {"car_id": from_hex})
+        logger.info("CONN_REJECT received ← %s (raised: %s)", from_hex, event)
 
     def _rx_conn_close(self, from_hex: str) -> None:
         with self._state_lock:
@@ -385,7 +412,6 @@ class RF24Manager:
         self._peer = None
         self._emit("peerDisconnected", {"car_id": from_hex})
         logger.info("Peer disconnected ← %s", from_hex)
-        logger.info("Connection rejected ← %s", from_hex)
 
     def _rx_info(self, from_hex: str, pkt: RFPacket) -> None:
         info = parse_info(pkt)
@@ -395,11 +421,15 @@ class RF24Manager:
         self._emit("carInfoUpdated", {"car_id": from_hex, **self._nearby[from_hex]})
 
     def _rx_ping(self, from_hex: str, pkt: RFPacket) -> None:
+        if not self._is_from_peer(from_hex):
+            return  # Don't pong strangers – prevents unsolicited ping floods
         seq = parse_ping_seq(pkt)
         self._driver.send(bytes.fromhex(from_hex), make_pong(self._car_id, seq))
         self._emit("messageReceived", {"car_id": from_hex, "kind": "ping"})
 
     def _rx_pong(self, from_hex: str, pkt: RFPacket) -> None:
+        if not self._is_from_peer(from_hex):
+            return
         seq = parse_ping_seq(pkt)
         if seq == self._ping_seq and self._ping_sent_at:
             latency_ms = int((time.monotonic() - self._ping_sent_at) * 1000)
@@ -411,9 +441,24 @@ class RF24Manager:
             })
 
     def _rx_message(self, from_hex: str, kind: str, extra: dict) -> None:
+        if not self._is_from_peer(from_hex):
+            return  # Silently drop messages from non-peers
         self._emit("messageReceived", {"car_id": from_hex, "kind": kind, **extra})
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _is_from_peer(self, from_hex: str) -> bool:
+        """Return True only if the sender is our active, connected peer.
+
+        Used to gate all message handlers so that a car which holds a stale
+        CONN_ACCEPT (because we cancelled mid-handshake) cannot deliver
+        messages, pings, or honks to us.
+        """
+        with self._state_lock:
+            return (
+                self._state == ConnectionState.CONNECTED
+                and self._peer == from_hex
+            )
 
     def _send_info_to(self, target: bytes) -> None:
         """Push all four metadata fields to the target car."""
