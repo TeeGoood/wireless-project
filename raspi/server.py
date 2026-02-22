@@ -24,19 +24,13 @@ async def get_users():
     return firebase.get("users")
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+@app.websocket("/ws/{username}")
+async def websocket_endpoint(websocket: WebSocket, username: str):
     await websocket.accept()
-    username = ""
     try:
-        username = await websocket.receive_text()
-        print(f"User connected: {username}")
-
-        await websocket.send_text(f"Hello {username}! Connected.")
-
         counter = 0
         while True:
-            await asyncio.sleep(5)  # interval
+            await asyncio.sleep(1)  # interval
             counter += 1
             await websocket.send_text(f"{username} message #{counter}")
 
