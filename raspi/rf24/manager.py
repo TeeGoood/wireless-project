@@ -13,7 +13,7 @@ Connection state machine
   IDLE ──scan──► SCANNING ──(beacon from unknown car)──► SCANNING
                              (user calls connect)──────► CONNECTING
                                                              │
-  IDLE ◄──(CONN_REJECT rx)──────────────────────────────────┘
+  IDLE ◄──(CONN_REJECT rx / timeout)─────────────────────────┘
   CONNECTED ◄──(CONN_ACCEPT rx)─────────────────────────────┘
 
   IDLE ──(CONN_REQUEST rx)──► PENDING_ACCEPT
@@ -26,12 +26,16 @@ Event types emitted to the UI
   scanStarted        Scan mode activated
   carDiscovered      New car spotted on broadcast channel
   carInfoUpdated     Full metadata received from a discovered car
+  carExpired         A car was removed after NEARBY_TTL seconds of silence
   infoUpdated        Own car metadata was changed
   connectionRequest  Remote car wants to connect
   connectionAccepted Connection is live (sent to both initiator and acceptor)
   connectionRejected Remote car rejected our connection request
-  disconnected       Active connection torn down
+  connectionCancelled Initiator withdrew the request before we decided
+  disconnected       Active connection torn down (we initiated)
+  peerDisconnected   Peer went away (CONN_CLOSE, heartbeat timeout, or cancel)
   messageReceived    text / sound / honk / ping / pong from peer
+  messageFailed      A message could not be delivered (TX failure)
   error              Something went wrong
 """
 
@@ -39,6 +43,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import random
 import threading
 import time
 from enum import Enum
@@ -55,6 +61,7 @@ from .protocol import (
     make_conn_close,
     make_conn_reject,
     make_conn_request,
+    parse_conn_nonce,
     make_honk,
     make_info,
     make_ping,
@@ -82,8 +89,13 @@ class ConnectionState(Enum):
 class RF24Manager:
     """Coordinates RF24 radio, car metadata, and WebSocket event delivery."""
 
-    BEACON_INTERVAL = 2.0   # seconds between periodic beacons while scanning
-    PING_TIMEOUT    = 5.0   # seconds after which an unanswered ping is forgotten
+    BEACON_INTERVAL    = 2.0   # base seconds between periodic beacons while scanning
+    BEACON_JITTER      = 1.0   # max random seconds added to each beacon interval
+    NEARBY_TTL         = 15.0  # seconds of silence before a car is removed from nearby
+    NEARBY_PRUNE_EVERY = 7.5   # how often the TTL pruner runs (NEARBY_TTL / 2)
+    HEARTBEAT_INTERVAL = 3.0   # seconds between keepalive pings while connected
+    HEARTBEAT_TIMEOUT  = 9.0   # seconds without a pong → declare peer lost
+    CONN_TIMEOUT       = 10.0  # seconds to wait for CONN_ACCEPT before giving up
 
     def __init__(self) -> None:
         self._config: dict[str, str] = {}
@@ -93,22 +105,42 @@ class RF24Manager:
         self._state = ConnectionState.IDLE
         self._state_lock = threading.Lock()
 
-        # Discovered cars: hex_car_id → {plate, color, model, owner, ...}
+        # Discovered cars: hex_car_id → {plate, color, model, owner, _seen_at}
+        # _seen_at is an internal float (time.monotonic) used for TTL pruning.
         self._nearby: dict[str, dict] = {}
 
-        # The single active peer (hex car_id string)
+        # The single active peer (hex car_id string).
+        # Set as soon as a connection is in-flight in either direction:
+        #   CONNECTING    → peer we sent CONN_REQUEST to
+        #   PENDING_ACCEPT → peer whose CONN_REQUEST we are considering
+        #   CONNECTED     → our live peer
         self._peer: Optional[str] = None
 
-        # Ping tracking
+        # Nonces for spam / replay prevention.
+        # _conn_nonce:  random bytes we put in our outgoing CONN_REQUEST.
+        #               Only a CONN_REJECT carrying this exact nonce can
+        #               move us out of CONNECTING state.
+        # _peer_nonce:  nonce from the CONN_REQUEST we are considering.
+        #               Echoed back in our CONN_REJECT / used to verify cancel.
+        self._conn_nonce: bytes = b"\x00\x00"
+        self._peer_nonce: bytes = b"\x00\x00"
+
+        # Ping tracking (manual user-initiated pings)
         self._ping_seq: int = 0
         self._ping_sent_at: float = 0.0
+
+        # Heartbeat liveness – tracks when the last pong arrived
+        self._last_pong_at: float = 0.0
 
         # asyncio integration (set in start())
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._event_queue: Optional[asyncio.Queue] = None
 
-        # Beacon timer
+        # Timers
         self._beacon_timer: Optional[threading.Timer] = None
+        self._prune_timer: Optional[threading.Timer] = None
+        self._conn_timer: Optional[threading.Timer] = None
+        self._heartbeat_timer: Optional[threading.Timer] = None
 
     # ── Startup / Shutdown ────────────────────────────────────────────────────
 
@@ -130,6 +162,9 @@ class RF24Manager:
 
     def stop(self) -> None:
         self._stop_beacon_timer()
+        self._stop_prune_timer()
+        self._stop_conn_timer()
+        self._stop_heartbeat()
         if self._driver:
             self._driver.stop()
 
@@ -152,7 +187,11 @@ class RF24Manager:
         return {**self._config, "car_id": self._car_id.hex()}
 
     def get_nearby(self) -> list[dict]:
-        return [{"car_id": cid, **info} for cid, info in self._nearby.items()]
+        # Strip the internal _seen_at key before returning to callers
+        return [
+            {"car_id": cid, **{k: v for k, v in info.items() if not k.startswith("_")}}
+            for cid, info in self._nearby.items()
+        ]
 
     def get_state(self) -> str:
         return self._state.value
@@ -160,11 +199,16 @@ class RF24Manager:
     # ── Scanning / Beaconing ──────────────────────────────────────────────────
 
     def handle_scan(self) -> None:
-        """Start broadcasting beacons and collecting nearby cars."""
+        """Start broadcasting beacons and collecting nearby cars.
+
+        Does NOT wipe the existing nearby list.  Stale entries are removed
+        by the TTL pruner so a re-scan does not cause a UI flicker where all
+        cars temporarily disappear and re-appear.
+        """
         with self._state_lock:
             self._state = ConnectionState.SCANNING
-        self._nearby.clear()
         self._emit("scanStarted", {})
+        self._start_prune_timer()
         self._send_beacon()
         self._schedule_beacon()
         logger.info("Scan started")
@@ -184,7 +228,10 @@ class RF24Manager:
         with self._state_lock:
             if self._state != ConnectionState.SCANNING:
                 return
-        self._beacon_timer = threading.Timer(self.BEACON_INTERVAL, self._beacon_tick)
+        # Jitter prevents all cars from hitting the broadcast channel at the
+        # same millisecond when they all started scanning at the same time.
+        interval = self.BEACON_INTERVAL + random.uniform(0, self.BEACON_JITTER)
+        self._beacon_timer = threading.Timer(interval, self._beacon_tick)
         self._beacon_timer.daemon = True
         self._beacon_timer.start()
 
@@ -197,6 +244,31 @@ class RF24Manager:
             self._beacon_timer.cancel()
             self._beacon_timer = None
 
+    # ── Nearby TTL pruner ─────────────────────────────────────────────────────
+
+    def _start_prune_timer(self) -> None:
+        self._stop_prune_timer()
+        self._prune_timer = threading.Timer(self.NEARBY_PRUNE_EVERY, self._prune_tick)
+        self._prune_timer.daemon = True
+        self._prune_timer.start()
+
+    def _prune_tick(self) -> None:
+        now = time.monotonic()
+        expired = [
+            cid for cid, info in self._nearby.items()
+            if now - info.get("_seen_at", now) > self.NEARBY_TTL
+        ]
+        for cid in expired:
+            del self._nearby[cid]
+            self._emit("carExpired", {"car_id": cid})
+            logger.info("Car expired (TTL=%.0fs) %s", self.NEARBY_TTL, cid)
+        self._start_prune_timer()  # Reschedule
+
+    def _stop_prune_timer(self) -> None:
+        if self._prune_timer:
+            self._prune_timer.cancel()
+            self._prune_timer = None
+
     # ── Connection ────────────────────────────────────────────────────────────
 
     def handle_connect(self, car_id_hex: str) -> None:
@@ -208,15 +280,33 @@ class RF24Manager:
             self._emit("error", {"message": f"Car {car_id_hex} not in scan results. Run scan first."})
             return
         with self._state_lock:
-            if self._state == ConnectionState.CONNECTED:
-                self._emit("error", {"message": "Already connected. Disconnect first."})
+            if self._state == ConnectionState.CONNECTING and self._peer == car_id_hex:
+                self._emit("error", {"message": "Already awaiting response from this car."})
+                return
+            if self._state in (ConnectionState.CONNECTING, ConnectionState.CONNECTED,
+                               ConnectionState.PENDING_ACCEPT):
+                self._emit("error", {"message": "Already in a connection. Disconnect first."})
                 return
             self._state = ConnectionState.CONNECTING
+
         self._peer = car_id_hex
+        self._conn_nonce = os.urandom(2)
         self._stop_beacon_timer()
-        pkt = make_conn_request(self._car_id)
-        self._driver.send(bytes.fromhex(car_id_hex), pkt)
-        logger.info("CONN_REQUEST sent → %s", car_id_hex)
+
+        pkt = make_conn_request(self._car_id, self._conn_nonce)
+        ok = self._driver.send(bytes.fromhex(car_id_hex), pkt)
+        if not ok:
+            # TX failed immediately – the car is likely out of range
+            with self._state_lock:
+                self._state = ConnectionState.IDLE
+            self._peer = None
+            self._conn_nonce = b"\x00\x00"
+            self._emit("error", {"message": f"Car {car_id_hex} is out of range (TX failed)"})
+            return
+
+        # Start a timeout so we don't stay stuck in CONNECTING forever
+        self._start_conn_timer()
+        logger.info("CONN_REQUEST sent → %s (nonce=%s)", car_id_hex, self._conn_nonce.hex())
 
     def handle_accept_connection(self, car_id_hex: str) -> None:
         """Accept a pending incoming connection request."""
@@ -226,6 +316,7 @@ class RF24Manager:
                 return
             self._state = ConnectionState.CONNECTED
         self._peer = car_id_hex
+        self._peer_nonce = b"\x00\x00"
 
         pkt = make_conn_accept(self._car_id)
         self._driver.send(bytes.fromhex(car_id_hex), pkt)
@@ -233,6 +324,7 @@ class RF24Manager:
         # Exchange full metadata with the new peer
         self._send_info_to(bytes.fromhex(car_id_hex))
 
+        self._start_heartbeat()
         self._emit("connectionAccepted", {"car_id": car_id_hex})
         logger.info("Connection accepted ↔ %s", car_id_hex)
 
@@ -241,8 +333,9 @@ class RF24Manager:
         with self._state_lock:
             self._state = ConnectionState.IDLE
         self._peer = None
+        nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
 
-        pkt = make_conn_reject(self._car_id)
+        pkt = make_conn_reject(self._car_id, nonce)
         self._driver.send(bytes.fromhex(car_id_hex), pkt)
         self._emit("connectionRejected", {"car_id": car_id_hex})
         logger.info("Connection rejected ← %s", car_id_hex)
@@ -254,9 +347,6 @@ class RF24Manager:
           CONNECTING → sends CONN_REJECT so the remote car knows the attempt
                        is cancelled before it has a chance to accept.
           CONNECTED  → sends CONN_CLOSE as before.
-
-        This prevents the race where Car B accepts after Car A already gave up,
-        leaving Car B thinking it is connected and free to send messages.
         """
         with self._state_lock:
             state = self._state
@@ -265,14 +355,87 @@ class RF24Manager:
                 return
             self._state = ConnectionState.IDLE
         self._peer = None
+        self._stop_conn_timer()
+        self._stop_heartbeat()
 
         if peer and self._driver:
             if state == ConnectionState.CONNECTED:
                 self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
-            else:  # CONNECTING – cancel before the other side has accepted
-                self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id))
+            else:  # CONNECTING – cancel; echo our nonce so Car B can verify the cancel
+                nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
+                self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
 
         self._emit("disconnected", {})
+
+    # ── Connection timeout ────────────────────────────────────────────────────
+
+    def _start_conn_timer(self) -> None:
+        self._stop_conn_timer()
+        self._conn_timer = threading.Timer(self.CONN_TIMEOUT, self._on_conn_timeout)
+        self._conn_timer.daemon = True
+        self._conn_timer.start()
+
+    def _stop_conn_timer(self) -> None:
+        if self._conn_timer:
+            self._conn_timer.cancel()
+            self._conn_timer = None
+
+    def _on_conn_timeout(self) -> None:
+        """Called when CONN_ACCEPT does not arrive within CONN_TIMEOUT seconds."""
+        with self._state_lock:
+            if self._state != ConnectionState.CONNECTING:
+                return
+            peer = self._peer
+            self._state = ConnectionState.IDLE
+        self._peer = None
+        nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
+        # Notify the peer that we gave up so it can clean up its state
+        if peer and self._driver:
+            self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
+        self._emit("error", {"message": f"Connection to {peer} timed out (no response in {self.CONN_TIMEOUT:.0f}s)"})
+        logger.info("CONN_TIMEOUT → %s", peer)
+
+    # ── Heartbeat / keepalive ─────────────────────────────────────────────────
+
+    def _start_heartbeat(self) -> None:
+        self._last_pong_at = time.monotonic()
+        self._stop_heartbeat()
+        self._heartbeat_timer = threading.Timer(self.HEARTBEAT_INTERVAL, self._heartbeat_tick)
+        self._heartbeat_timer.daemon = True
+        self._heartbeat_timer.start()
+
+    def _stop_heartbeat(self) -> None:
+        if self._heartbeat_timer:
+            self._heartbeat_timer.cancel()
+            self._heartbeat_timer = None
+
+    def _heartbeat_tick(self) -> None:
+        with self._state_lock:
+            if self._state != ConnectionState.CONNECTED:
+                return
+            peer = self._peer
+
+        # Declare peer lost if we haven't heard from them recently
+        if time.monotonic() - self._last_pong_at > self.HEARTBEAT_TIMEOUT:
+            with self._state_lock:
+                self._state = ConnectionState.IDLE
+            self._peer = None
+            self._emit("peerDisconnected", {"car_id": peer})
+            logger.info(
+                "Heartbeat timeout (%.0fs) – peer %s declared lost",
+                self.HEARTBEAT_TIMEOUT, peer,
+            )
+            return
+
+        # Send a keepalive ping and reschedule
+        self._ping_seq = (self._ping_seq + 1) % 0xFFFF
+        self._ping_sent_at = time.monotonic()
+        pkt = make_ping(self._car_id, self._ping_seq)
+        self._driver.send(bytes.fromhex(peer), pkt)
+
+        self._heartbeat_timer = threading.Timer(self.HEARTBEAT_INTERVAL, self._heartbeat_tick)
+        self._heartbeat_timer.daemon = True
+        self._heartbeat_timer.start()
 
     # ── Messaging (requires active connection) ────────────────────────────────
 
@@ -280,19 +443,22 @@ class RF24Manager:
         if not self._assert_connected():
             return
         pkt = make_text(self._car_id, text[:26])
-        self._driver.send(bytes.fromhex(self._peer), pkt)
+        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+            self._emit("messageFailed", {"kind": "text"})
 
     def handle_send_sound(self, sound_id: int) -> None:
         if not self._assert_connected():
             return
         pkt = make_sound(self._car_id, sound_id)
-        self._driver.send(bytes.fromhex(self._peer), pkt)
+        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+            self._emit("messageFailed", {"kind": "sound"})
 
     def handle_send_honk(self) -> None:
         if not self._assert_connected():
             return
         pkt = make_honk(self._car_id)
-        self._driver.send(bytes.fromhex(self._peer), pkt)
+        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+            self._emit("messageFailed", {"kind": "honk"})
 
     def handle_send_ping(self) -> None:
         if not self._assert_connected():
@@ -326,9 +492,9 @@ class RF24Manager:
 
         dispatch = {
             MsgType.BEACON:       lambda: self._rx_beacon(from_hex, pkt),
-            MsgType.CONN_REQUEST: lambda: self._rx_conn_request(from_hex),
+            MsgType.CONN_REQUEST: lambda: self._rx_conn_request(from_hex, pkt),
             MsgType.CONN_ACCEPT:  lambda: self._rx_conn_accept(from_hex),
-            MsgType.CONN_REJECT:  lambda: self._rx_conn_reject(from_hex),
+            MsgType.CONN_REJECT:  lambda: self._rx_conn_reject(from_hex, pkt),
             MsgType.CONN_CLOSE:   lambda: self._rx_conn_close(from_hex),
             MsgType.INFO:         lambda: self._rx_info(from_hex, pkt),
             MsgType.PING:         lambda: self._rx_ping(from_hex, pkt),
@@ -346,30 +512,41 @@ class RF24Manager:
 
     def _rx_beacon(self, from_hex: str, pkt: RFPacket) -> None:
         info = parse_beacon(pkt)
+        now = time.monotonic()
         if from_hex not in self._nearby:
-            self._nearby[from_hex] = info
+            self._nearby[from_hex] = {**info, "_seen_at": now}
             self._emit("carDiscovered", {"car_id": from_hex, **info})
             logger.info("Discovered car %s (plate=%s)", from_hex, info.get("plate"))
         else:
-            self._nearby[from_hex].update(info)
+            # Refresh TTL and update plate (may have changed via setinfo)
+            self._nearby[from_hex].update({**info, "_seen_at": now})
 
-    def _rx_conn_request(self, from_hex: str) -> None:
+    def _rx_conn_request(self, from_hex: str, pkt: RFPacket) -> None:
+        nonce = parse_conn_nonce(pkt)
         with self._state_lock:
             if self._state not in (ConnectionState.IDLE, ConnectionState.SCANNING):
-                # Already busy – auto-reject
+                # Already busy – auto-reject, echoing the nonce so the sender
+                # can correlate this rejection with the exact request they sent.
                 self._driver.send(
                     bytes.fromhex(from_hex),
-                    make_conn_reject(self._car_id),
+                    make_conn_reject(self._car_id, nonce),
                 )
                 return
             self._state = ConnectionState.PENDING_ACCEPT
+
+        # Store the requester and their nonce so that:
+        #   • _rx_conn_reject can detect if they cancel before we accept
+        #   • handle_reject_connection can echo the right nonce back
+        self._peer       = from_hex
+        self._peer_nonce = nonce
+
         self._stop_beacon_timer()
         info = self._nearby.get(from_hex, {})
         self._emit("connectionRequest", {
             "car_id": from_hex,
             "plate": info.get("plate", from_hex),
         })
-        logger.info("CONN_REQUEST received ← %s", from_hex)
+        logger.info("CONN_REQUEST received ← %s (nonce=%s)", from_hex, nonce.hex())
 
     def _rx_conn_accept(self, from_hex: str) -> None:
         with self._state_lock:
@@ -377,32 +554,61 @@ class RF24Manager:
                 return
             self._state = ConnectionState.CONNECTED
 
+        self._stop_conn_timer()
+
         # Exchange full metadata now that the connection is live
         self._send_info_to(bytes.fromhex(from_hex))
 
+        self._start_heartbeat()
         self._emit("connectionAccepted", {"car_id": from_hex})
         logger.info("Connection accepted ↔ %s", from_hex)
 
-    def _rx_conn_reject(self, from_hex: str) -> None:
-        # Determine which event to raise before releasing the lock.
+    def _rx_conn_reject(self, from_hex: str, pkt: RFPacket) -> None:
+        nonce = parse_conn_nonce(pkt)
         event = None
+        prev_state = None
         with self._state_lock:
             if self._peer != from_hex:
                 return
+
             if self._state == ConnectionState.CONNECTING:
-                # Normal rejection: remote declined our request.
+                if nonce != self._conn_nonce:
+                    logger.debug(
+                        "Stale CONN_REJECT from %s (nonce %s ≠ %s) – ignored",
+                        from_hex, nonce.hex(), self._conn_nonce.hex(),
+                    )
+                    return
                 event = "connectionRejected"
+                prev_state = ConnectionState.CONNECTING
                 self._state = ConnectionState.IDLE
+
+            elif self._state == ConnectionState.PENDING_ACCEPT:
+                if nonce != self._peer_nonce:
+                    logger.debug("Stale/spoofed CONN_REJECT while PENDING_ACCEPT – ignored")
+                    return
+                event = "connectionCancelled"
+                self._state = ConnectionState.IDLE
+
             elif self._state == ConnectionState.CONNECTED:
-                # Race condition: we accepted, but the initiator cancelled
-                # before our CONN_ACCEPT arrived.  Treat it like a close.
+                # Race: we accepted but initiator cancelled before CONN_ACCEPT arrived
                 event = "peerDisconnected"
+                prev_state = ConnectionState.CONNECTED
                 self._state = ConnectionState.IDLE
+
         if event is None:
             return
-        self._peer = None
+
+        # Cancel whichever timer was running for this state
+        if prev_state == ConnectionState.CONNECTING:
+            self._stop_conn_timer()
+        elif prev_state == ConnectionState.CONNECTED:
+            self._stop_heartbeat()
+
+        self._peer       = None
+        self._conn_nonce = b"\x00\x00"
+        self._peer_nonce = b"\x00\x00"
         self._emit(event, {"car_id": from_hex})
-        logger.info("CONN_REJECT received ← %s (raised: %s)", from_hex, event)
+        logger.info("CONN_REJECT received ← %s → %s", from_hex, event)
 
     def _rx_conn_close(self, from_hex: str) -> None:
         with self._state_lock:
@@ -410,6 +616,7 @@ class RF24Manager:
                 return  # Not our current peer – ignore stale packet
             self._state = ConnectionState.IDLE
         self._peer = None
+        self._stop_heartbeat()
         self._emit("peerDisconnected", {"car_id": from_hex})
         logger.info("Peer disconnected ← %s", from_hex)
 
@@ -418,18 +625,24 @@ class RF24Manager:
         if from_hex not in self._nearby:
             self._nearby[from_hex] = {}
         self._nearby[from_hex].update(info)
-        self._emit("carInfoUpdated", {"car_id": from_hex, **self._nearby[from_hex]})
+        # Expose only non-internal keys to the UI
+        public = {k: v for k, v in self._nearby[from_hex].items() if not k.startswith("_")}
+        self._emit("carInfoUpdated", {"car_id": from_hex, **public})
 
     def _rx_ping(self, from_hex: str, pkt: RFPacket) -> None:
         if not self._is_from_peer(from_hex):
             return  # Don't pong strangers – prevents unsolicited ping floods
         seq = parse_ping_seq(pkt)
         self._driver.send(bytes.fromhex(from_hex), make_pong(self._car_id, seq))
+        # A ping also counts as liveness evidence
+        self._last_pong_at = time.monotonic()
         self._emit("messageReceived", {"car_id": from_hex, "kind": "ping"})
 
     def _rx_pong(self, from_hex: str, pkt: RFPacket) -> None:
         if not self._is_from_peer(from_hex):
             return
+        # Update liveness timestamp – resets the heartbeat timeout window
+        self._last_pong_at = time.monotonic()
         seq = parse_ping_seq(pkt)
         if seq == self._ping_seq and self._ping_sent_at:
             latency_ms = int((time.monotonic() - self._ping_sent_at) * 1000)
