@@ -160,22 +160,19 @@ else
     ok "vendor/pyrf24 cloned."
 fi
 
-# ── 5b. Build + install via uv sync ──────────────────────────────────────────
+# ── 5b. Build + install via uv pip ───────────────────────────────────────────
 #
-# pyproject.toml declares:
-#   "pyrf24 ; sys_platform == 'linux'"
-#   [tool.uv.sources] pyrf24 = { path = "./vendor/pyrf24" }
-#   [tool.uv] no-build-isolation-package = ["pyrf24"]
+# pyrf24 is intentionally NOT declared in pyproject.toml – it is Linux-only and
+# the path dependency would break `uv sync` on Mac/Windows (uv validates paths
+# eagerly regardless of platform markers).
 #
-# So `uv sync` will build pyrf24 from vendor/pyrf24/ using system cmake/g++
-# and register it properly in the venv + uv.lock (~10-20 min first time).
+# Instead, we install it directly with `uv pip install` here, and `make deploy`
+# uses `uv sync --inexact` so uv doesn't remove it on subsequent deploys.
 
 info "Building pyrf24 from vendor/pyrf24/ (first run ~10-20 min) …"
 warn "This takes 10-20 minutes on a Pi 4. Grab a coffee ☕"
-# --reinstall-package ensures the C extension is always recompiled from source,
-# even if a stale/incomplete build was recorded in the venv from a previous run.
-uv sync --reinstall-package pyrf24
-ok "pyrf24 built and installed via uv sync."
+uv pip install --no-build-isolation --reinstall "$VENDOR_DIR"
+ok "pyrf24 built and installed."
 
 # ── 6. Verify ─────────────────────────────────────────────────────────────────
 info "Verifying RF24 import …"
