@@ -11,7 +11,7 @@ function DocumentIcon() {
   );
 }
 
-export function CaseStatisticsCard() {
+export function ConnectionStatisticsCard() {
   const { loading, stats } = useDashboardFirebase();
   const successfulCases = stats?.connect ?? 0;
   const unsuccessfulCases = stats?.error ?? 0;
