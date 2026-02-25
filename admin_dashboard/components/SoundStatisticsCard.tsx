@@ -14,10 +14,11 @@ function ChartIcon() {
 
 export function SoundStatisticsCard({ className }: { className?: string }) {
   const { loading, stats } = useDashboardFirebase();
-  const data = loading ? [] : Object.values(stats?.sounds ?? {});
-  const BAR_MAX = stats?.sendSound ?? 0;
+  const sounds = loading ? {} : stats?.sounds ?? {};
+  const BAR_MAX = loading ? 0 : stats?.sendSound ?? 0;
 
-  const rows = Object.entries(data).map(([label, value]) => ({ label, value }))
+  const rows = Object.entries(sounds)
+    .map(([label, value]) => ({ label, value: Number(value) }))
     .sort((a, b) => b.value - a.value);
 
   return (
