@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ── Import RF24 library (graceful fallback) ───────────────────────────────────
 
 try:
-    from RF24 import RF24, RF24_PA_HIGH, RF24_1MBPS  # type: ignore[import]
+    from pyrf24 import RF24, RF24_PA_HIGH, RF24_1MBPS  # type: ignore[import]
 
     _RF24_AVAILABLE = True
 except ImportError:

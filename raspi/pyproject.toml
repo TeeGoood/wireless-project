@@ -10,4 +10,25 @@ dependencies = [
     "pyrebase4>=4.9.0",
     "uvicorn>=0.41.0",
     "websockets>=16.0",
+    # pyrf24 is Linux-only; source is cloned to vendor/pyrf24/ by install-rf24.sh.
+    "pyrf24 ; sys_platform == 'linux'",
 ]
+
+[dependency-groups]
+dev = ["setuptools>=82.0.0"]
+
+[tool.uv]
+# pyrf24 requires system cmake/g++ – skip pip's isolated build env.
+no-build-isolation-package = ["pyrf24"]
+
+[tool.uv.extra-build-dependencies]
+pyrf24 = ["setuptools"]
+
+[tool.uv.sources]
+# Map pyrf24 to the vendored source so `uv sync` builds it locally.
+pyrf24 = { path = "./vendor/pyrf24", marker = "sys_platform == 'linux'" }
+
+[tool.setuptools.packages.find]
+# vendor/ contains the pyrf24 C++ source tree, not a Python package.
+# Without this, setuptools sees ['rf24', 'vendor'] and refuses to build raspi.
+exclude = ["vendor*"]

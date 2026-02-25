@@ -1,36 +1,39 @@
-# ── Deployment config (override on the CLI: make deploy PI=pi@192.168.1.10) ──
-# NOTE: never put inline comments after variable assignments in Make –
-#       spaces before # become part of the value and break commands.
 PI      ?= pi@raspberrypi.local
 PI_DIR  ?= ~/talksig
 SERVICE ?= talksig
 
-# ── Local shortcuts ───────────────────────────────────────────────────────────
+# Login shell so ~/.profile is sourced and uv is on PATH.
+# Keepalive prevents the connection dropping during the RF24 build (~15 min).
+SSHOPTS := -o ServerAliveInterval=60 -o ServerAliveCountMax=30
+REMOTE  := ssh $(SSHOPTS) $(PI) bash -lc
 
-.PHONY: help sync deploy service install logs restart stop status shell
+.PHONY: help sync deploy base rf24 service firstrun logs restart testkit shell status
+
+# ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
 	@echo ""
-	@echo "  ── From your laptop (deploys to Pi over SSH) ──────────────────"
-	@echo "  make sync      rsync source files to the Pi (no restart)"
+	@echo "  ── First-time setup (run each step or all at once) ────────────"
+	@echo "  make sync      push source files to the Pi"
+	@echo "  make base      system setup: uv, spi, gpio groups"
+	@echo "  make rf24      build RF24 Python driver  (~15 min)"
+	@echo "  make service   install / refresh the systemd service"
+	@echo ""
+	@echo "  make firstrun  all four steps above in order"
+	@echo ""
+	@echo "  ── Day-to-day ─────────────────────────────────────────────────"
 	@echo "  make deploy    sync + install deps + restart service"
-	@echo "  make service   install / enable the systemd service (first time)"
-	@echo ""
-	@echo "  ── Run directly ON the Raspberry Pi ───────────────────────────"
-	@echo "  make install   bootstrap deps + install + enable systemd service"
-	@echo ""
-	@echo "  ── Remote helpers (SSH) ────────────────────────────────────────"
 	@echo "  make logs      tail live service logs"
-	@echo "  make restart   restart the service on the Pi"
-	@echo "  make stop      stop the service on the Pi"
+	@echo "  make restart   restart the service"
 	@echo "  make status    show service status"
+	@echo "  make testkit   run the interactive testkit on the Pi"
 	@echo "  make shell     open an SSH shell on the Pi"
 	@echo ""
-	@echo "  Override Pi target:  make deploy PI=pi@192.168.1.100"
+	@echo "  Override Pi:   make deploy PI=pi@192.168.1.100"
 	@echo ""
 
-# Sync source files to the Pi (skips secrets, caches, git history)
-# -e ssh is required – macOS ships with rsync 2.6.9 which doesn't default to SSH
+# ── Sync ──────────────────────────────────────────────────────────────────────
+
 sync:
 	ssh $(PI) "mkdir -p $(PI_DIR)"
 	rsync -avz --progress -e ssh \
@@ -39,67 +42,57 @@ sync:
 		--exclude '.git/' \
 		--exclude '.python-version' \
 		--exclude 'firebase-key.json' \
-		--exclude 'uv.lock' \
-		--exclude '*/config.txt' \
+		--exclude 'config.txt' \
+		--exclude '.venv/' \
+		--exclude 'vendor/' \
 		raspi/ $(PI):$(PI_DIR)/
 	@echo ""
-	@echo "⚠  Remember to copy firebase-key.json manually if it changed:"
+	@echo "⚠  Remember to copy firebase-key.json if it changed:"
 	@echo "   scp raspi/firebase-key.json $(PI):$(PI_DIR)/"
 
-# Full deploy: sync → install deps → restart
+# ── First-time setup steps (all idempotent – safe to re-run individually) ────
+
+base: sync
+	$(REMOTE) "cd $(PI_DIR) && bash setup.sh"
+
+rf24:
+	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-rf24.sh"
+
+service:
+	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-service.sh $(SERVICE)"
+
+# ── firstrun: all steps in order, each independently resumable ────────────────
+#
+#   make firstrun           – full first-time setup
+#   make base               – re-run just the system bootstrap
+#   make rf24               – re-run just the RF24 build (e.g. after a timeout)
+#   make service            – re-install just the systemd service
+
+firstrun: base rf24 service
+	@echo ""
+	@echo "✓ First-time setup complete."
+	@echo "  Start or check the service:"
+	@echo "    make logs"
+	@echo ""
+
+# ── Day-to-day ────────────────────────────────────────────────────────────────
+
 deploy: sync
-	ssh $(PI) "cd $(PI_DIR) && uv sync --frozen"
-	ssh $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
+	$(REMOTE) "cd $(PI_DIR) && uv sync"
+	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
 	@echo "✓ Deployed and restarted."
 
-# Install the systemd service (run from your laptop via SSH)
-service:
-	ssh $(PI) "cd $(PI_DIR) && \
-		_user=\$$(whoami) && \
-		_uv=\$$(which uv 2>/dev/null || echo \$$HOME/.local/bin/uv) && \
-		sed \
-			-e 's|{{PI_DIR}}|$(PI_DIR)|g' \
-			-e \"s|{{USER}}|\$$_user|g\" \
-			-e \"s|{{UV_BIN}}|\$$_uv|g\" \
-			talksig.service \
-			| sudo tee /etc/systemd/system/$(SERVICE).service > /dev/null \
-		&& sudo systemctl daemon-reload \
-		&& sudo systemctl enable --now $(SERVICE)"
-	@echo "✓ Service enabled and started."
-
-# ── On-Pi install (run this directly on the Raspberry Pi) ────────────────────
-#
-#   cd ~/talksig && make install
-#
-install:
-	bash setup.sh
-	sed \
-		-e 's|{{PI_DIR}}|$(CURDIR)|g' \
-		-e 's|{{USER}}|$(shell whoami)|g' \
-		-e 's|{{UV_BIN}}|$(shell which uv 2>/dev/null || echo $(HOME)/.local/bin/uv)|g' \
-		talksig.service \
-		| sudo tee /etc/systemd/system/$(SERVICE).service > /dev/null
-	sudo systemctl daemon-reload
-	sudo systemctl enable --now $(SERVICE)
-	@echo ""
-	@echo "✓ $(SERVICE) installed and started."
-	@echo "  Logs:    journalctl -u $(SERVICE) -f"
-	@echo "  Status:  systemctl status $(SERVICE)"
-	@echo ""
-
-# ── Remote helpers ────────────────────────────────────────────────────────────
-
 logs:
-	ssh $(PI) "journalctl -u $(SERVICE) -f --output=cat"
+	ssh $(SSHOPTS) $(PI) "journalctl -u $(SERVICE) -f --output=cat"
 
 restart:
-	ssh $(PI) "sudo systemctl restart $(SERVICE)"
+	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE)"
 
-stop:
-	ssh $(PI) "sudo systemctl stop $(SERVICE)"
-
-status:
-	ssh $(PI) "sudo systemctl status $(SERVICE)"
+testkit:
+	ssh $(SSHOPTS) -t $(PI) "cd $(PI_DIR) && uv run python testkit.py"
 
 shell:
-	ssh $(PI)
+	ssh -t $(PI)
+
+status:
+	ssh $(SSHOPTS) $(PI) "sudo systemctl status $(SERVICE)"
