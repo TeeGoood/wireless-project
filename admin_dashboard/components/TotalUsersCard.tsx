@@ -1,5 +1,6 @@
 'use client';
 
+import { useDashboardFirebase } from '@/context/DashboardFirebaseContext';
 import { DashboardCard } from './DashboardCard';
 
 function UsersIcon() {
@@ -11,18 +12,22 @@ function UsersIcon() {
 }
 
 interface TotalUsersCardProps {
+  /** Override online count from Firebase when provided */
   online?: number;
-  offline?: number;
 }
 
-export function TotalUsersCard({ online = 2, offline = 0 }: TotalUsersCardProps) {
+export function TotalUsersCard({ online }: TotalUsersCardProps) {
+  const { onlineCount, loading } = useDashboardFirebase();
+  const displayCount = typeof online === 'number' ? online : onlineCount;
+
   return (
     <DashboardCard
       title="Total Users"
       icon={<UsersIcon />}
     >
-      <p className="text-2xl font-bold text-darkTeal">{online} Online Users</p>
-      <p className="text-sm text-mutedTeal mt-1">{offline} offline</p>
+      <p className="text-2xl font-bold text-darkTeal">
+        {loading ? '…' : displayCount} Online Users
+      </p>
       <p className="text-xs text-mutedTeal mt-3">
         If the status is not up to date, you may need to reload this page.
       </p>

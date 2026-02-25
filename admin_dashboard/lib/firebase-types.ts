@@ -4,8 +4,12 @@
  */
 
 export interface FirebaseUser {
-  name: string;
-  age?: number;
+  car_id: string;
+  color: string;
+  last_seen: string;
+  model: string;
+  owner: string;
+  plate: string;
 }
 
 /** Map of user id → user (e.g. "user1" | "-Om31ZLtQ4KkxMjuTVZW" → FirebaseUser) */
