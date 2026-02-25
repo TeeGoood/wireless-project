@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --dark-teal: #0B2027;
+  --medium-blue: #40798C;
+  --muted-teal: #70A9A1;
+  --light-grey: #CFD7C7;
+  --light-cream: #F6F1D1;
+  --foreground-rgb: 11, 32, 39;
+  --background: #F6F1D1;
+  --page-bg: #F5F5F5;
+}
+
+html,
+body {
+  color: var(--dark-teal);
+  background: var(--page-bg);
+}
+
