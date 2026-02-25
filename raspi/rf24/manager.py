@@ -158,6 +158,10 @@ class RF24Manager:
             on_receive=self._on_raw_receive,
         )
         self._driver.start()
+        # Always-on presence beacon – makes this car discoverable to others
+        # without requiring a manual scan command first.
+        self._send_beacon()
+        self._schedule_beacon()
         logger.info("RF24Manager started | car_id=%s", self._car_id.hex())
 
     def stop(self) -> None:
@@ -204,13 +208,14 @@ class RF24Manager:
         Does NOT wipe the existing nearby list.  Stale entries are removed
         by the TTL pruner so a re-scan does not cause a UI flicker where all
         cars temporarily disappear and re-appear.
+
+        The presence beacon is already running (started at server boot), so
+        scan mode only needs to enable carDiscovered events and the TTL pruner.
         """
         with self._state_lock:
             self._state = ConnectionState.SCANNING
         self._emit("scanStarted", {})
         self._start_prune_timer()
-        self._send_beacon()
-        self._schedule_beacon()
         logger.info("Scan started")
 
     def handle_beacon(self) -> None:
@@ -225,11 +230,9 @@ class RF24Manager:
         logger.debug("Beacon broadcast")
 
     def _schedule_beacon(self) -> None:
-        with self._state_lock:
-            if self._state != ConnectionState.SCANNING:
-                return
-        # Jitter prevents all cars from hitting the broadcast channel at the
-        # same millisecond when they all started scanning at the same time.
+        # No state gate – beacon fires in ALL states so this car is always
+        # discoverable.  Jitter prevents a fleet from synchronising their
+        # transmissions and flooding the broadcast channel simultaneously.
         interval = self.BEACON_INTERVAL + random.uniform(0, self.BEACON_JITTER)
         self._beacon_timer = threading.Timer(interval, self._beacon_tick)
         self._beacon_timer.daemon = True
@@ -291,7 +294,6 @@ class RF24Manager:
 
         self._peer = car_id_hex
         self._conn_nonce = os.urandom(2)
-        self._stop_beacon_timer()
 
         pkt = make_conn_request(self._car_id, self._conn_nonce)
         ok = self._driver.send(bytes.fromhex(car_id_hex), pkt)
@@ -540,7 +542,6 @@ class RF24Manager:
         self._peer       = from_hex
         self._peer_nonce = nonce
 
-        self._stop_beacon_timer()
         info = self._nearby.get(from_hex, {})
         self._emit("connectionRequest", {
             "car_id": from_hex,
