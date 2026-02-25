@@ -1,50 +1,38 @@
-# ── Target Pi (override: make deploy PI=pi@192.168.1.10) ─────────────────────
-# NOTE: no inline comments after variable assignments – trailing spaces break commands.
 PI      ?= pi@raspberrypi.local
 PI_DIR  ?= ~/talksig
 SERVICE ?= talksig
 
-# ServerAliveInterval: send a keepalive packet every 60 s.
-# ServerAliveCountMax: give up after 30 missed replies (= 30 min max idle).
-# This keeps the connection alive during the RF24 source build (~15–20 min).
+# Login shell so ~/.profile is sourced and uv is on PATH.
+# Keepalive prevents the connection dropping during the RF24 build (~15 min).
 SSHOPTS := -o ServerAliveInterval=60 -o ServerAliveCountMax=30
+REMOTE  := ssh $(SSHOPTS) $(PI) bash -lc
 
-# REMOTE: login shell over SSH so ~/.profile is sourced and ~/.local/bin
-# (where uv installs itself) is on PATH.  Use this for any command that
-# calls uv or scripts that call uv.  Plain `ssh` is used for everything else.
-REMOTE := ssh $(SSHOPTS) $(PI) bash -lc
+.PHONY: help sync deploy base rf24 service firstrun logs restart testkit shell status
 
-.PHONY: help firstrun sync deploy rf24 service install logs restart restart-pi stop status shell
+# ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
 	@echo ""
-	@echo "  ── First time (from your laptop, no Pi login needed) ──────────"
-	@echo "  make firstrun  sync + bootstrap + RF24 driver + systemd service"
+	@echo "  ── First-time setup (run each step or all at once) ────────────"
+	@echo "  make sync      push source files to the Pi"
+	@echo "  make base      system setup: uv, spi, gpio groups"
+	@echo "  make rf24      build RF24 Python driver  (~15 min)"
+	@echo "  make service   install / refresh the systemd service"
 	@echo ""
-	@echo "  ── Day-to-day (from your laptop) ──────────────────────────────"
-	@echo "  make sync      push source files to the Pi (no restart)"
-	@echo "  make deploy    sync + uv sync + restart service"
+	@echo "  make firstrun  all four steps above in order"
 	@echo ""
-	@echo "  ── Individual steps (via SSH, idempotent – safe to re-run) ────"
-	@echo "  make rf24      install RF24 C++ lib + pyrf24  (~15 min first run)"
-	@echo "  make service   install / refresh the systemd service unit"
-	@echo ""
-	@echo "  ── Run directly ON the Raspberry Pi ───────────────────────────"
-	@echo "  make install   full local setup: deps + RF24 driver + service"
-	@echo ""
-	@echo "  ── Service management ──────────────────────────────────────────"
+	@echo "  ── Day-to-day ─────────────────────────────────────────────────"
+	@echo "  make deploy    sync + install deps + restart service"
 	@echo "  make logs      tail live service logs"
 	@echo "  make restart   restart the service"
-	@echo "  make stop      stop the service"
 	@echo "  make status    show service status"
+	@echo "  make testkit   run the interactive testkit on the Pi"
 	@echo "  make shell     open an SSH shell on the Pi"
 	@echo ""
-	@echo "  Override target:  make deploy PI=pi@192.168.1.100"
+	@echo "  Override Pi:   make deploy PI=pi@192.168.1.100"
 	@echo ""
 
 # ── Sync ──────────────────────────────────────────────────────────────────────
-# Push raspi/ to the Pi.  uv.lock IS included so `uv sync --frozen` works.
-# -e ssh is required – macOS ships with rsync 2.6.9 which doesn't default to SSH.
 
 sync:
 	ssh $(PI) "mkdir -p $(PI_DIR)"
@@ -62,60 +50,37 @@ sync:
 	@echo "⚠  Remember to copy firebase-key.json if it changed:"
 	@echo "   scp raspi/firebase-key.json $(PI):$(PI_DIR)/"
 
-# ── First-time setup (from your laptop, no manual Pi login required) ──────────
-#
-#   make firstrun
-#
-# Runs three idempotent steps in order; each can be re-run individually
-# if interrupted (e.g. RF24 build timeout → just re-run `make rf24`).
+# ── First-time setup steps (all idempotent – safe to re-run individually) ────
 
-firstrun: sync
-	@echo ""
-	@echo "━━━  Step 1 / 3 – bootstrap (uv, deps, groups, config)  ━━━"
-	$(REMOTE) "PI_DIR='$(PI_DIR)'; cd $(PI_DIR) && bash setup.sh"
-	@echo ""
-	@echo "━━━  Step 2 / 3 – RF24 driver (wheel or source build ~15 min)  ━━━"
-	$(REMOTE) "PI_DIR='$(PI_DIR)'; cd $(PI_DIR) && bash scripts/install-rf24.sh"
-	@echo ""
-	@echo "━━━  Step 3 / 3 – systemd service  ━━━"
-	$(REMOTE) "PI_DIR='$(PI_DIR)'; cd $(PI_DIR) && bash scripts/install-service.sh $(SERVICE)"
-	@echo ""
-	@echo "✓ First-time setup complete."
-	@echo "  If SPI was just enabled, reboot the Pi and the service starts automatically:"
-	@echo "    make restart-pi"
-	@echo ""
-
-# ── Day-to-day deploy ─────────────────────────────────────────────────────────
-
-deploy: sync
-	$(REMOTE) 'cd $(PI_DIR) && uv sync'
-	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
-	@echo "✓ Deployed and restarted."
-
-# ── Individual setup steps (all idempotent, safe to re-run) ──────────────────
+base: sync
+	$(REMOTE) "cd $(PI_DIR) && bash setup.sh"
 
 rf24:
-	$(REMOTE) 'cd $(PI_DIR) && bash scripts/install-rf24.sh'
+	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-rf24.sh"
 
 service:
-	$(REMOTE) "PI_DIR='$(PI_DIR)'; cd $(PI_DIR) && bash scripts/install-service.sh $(SERVICE)"
-	@echo "✓ Service installed and started."
+	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-service.sh $(SERVICE)"
 
-# ── On-Pi install (run directly on the Raspberry Pi) ─────────────────────────
+# ── firstrun: all steps in order, each independently resumable ────────────────
 #
-#   cd ~/talksig && make install
-#
-# Equivalent to `make firstrun` but runs locally instead of over SSH.
+#   make firstrun           – full first-time setup
+#   make base               – re-run just the system bootstrap
+#   make rf24               – re-run just the RF24 build (e.g. after a timeout)
+#   make service            – re-install just the systemd service
 
-install:
-	bash setup.sh
-	bash scripts/install-rf24.sh
-	bash scripts/install-service.sh $(SERVICE)
+firstrun: base rf24 service
 	@echo ""
-	@echo "✓ $(SERVICE) installed and started."
+	@echo "✓ First-time setup complete."
+	@echo "  Start or check the service:"
+	@echo "    make logs"
 	@echo ""
 
-# ── Service management ────────────────────────────────────────────────────────
+# ── Day-to-day ────────────────────────────────────────────────────────────────
+
+deploy: sync
+	$(REMOTE) "cd $(PI_DIR) && uv sync"
+	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
+	@echo "✓ Deployed and restarted."
 
 logs:
 	ssh $(SSHOPTS) $(PI) "journalctl -u $(SERVICE) -f --output=cat"
@@ -123,14 +88,11 @@ logs:
 restart:
 	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE)"
 
-restart-pi:
-	ssh $(SSHOPTS) $(PI) "sudo reboot"
+testkit:
+	ssh $(SSHOPTS) -t $(PI) "cd $(PI_DIR) && uv run python testkit.py"
 
-stop:
-	ssh $(SSHOPTS) $(PI) "sudo systemctl stop $(SERVICE)"
+shell:
+	ssh -t $(PI)
 
 status:
 	ssh $(SSHOPTS) $(PI) "sudo systemctl status $(SERVICE)"
-
-shell:
-	ssh $(PI)

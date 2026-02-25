@@ -26,7 +26,7 @@ pyrf24 = ["setuptools"]
 
 [tool.uv.sources]
 # Map pyrf24 to the vendored source so `uv sync` builds it locally.
-pyrf24 = { path = "./vendor/pyrf24" }
+pyrf24 = { path = "./vendor/pyrf24", marker = "sys_platform == 'linux'" }
 
 [tool.setuptools.packages.find]
 # vendor/ contains the pyrf24 C++ source tree, not a Python package.
