@@ -78,7 +78,7 @@ firstrun: base rf24 service
 # ── Day-to-day ────────────────────────────────────────────────────────────────
 
 deploy: sync
-	$(REMOTE) "cd $(PI_DIR) && uv sync"
+	$(REMOTE) "cd $(PI_DIR) && uv sync --inexact"
 	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
 	@echo "✓ Deployed and restarted."
 
