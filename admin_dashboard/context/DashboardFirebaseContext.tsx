@@ -37,7 +37,7 @@ function computeOnlineCount(users: UsersMap | null): number {
 
 export function computeAggregatedStats(stats: StatsMap | null): StatsStruct | null {
   if (!stats || typeof stats !== 'object') return null;
-  const aggregated: StatsStruct = { connect: 0, error: 0, getInfo: 0, sendSound: 0, sounds: {} };
+  const aggregated: StatsStruct = { connect: 0, error: 0, getInfo: 0, sendSound: 0, sounds: {}, maxSound: 0 };
   for (const entry of Object.values(stats)) {
     if (entry && typeof entry === 'object') {
       aggregated.connect += Number(entry.connect ?? 0);
@@ -46,6 +46,7 @@ export function computeAggregatedStats(stats: StatsMap | null): StatsStruct | nu
       aggregated.sendSound += Number(entry.sendSound ?? 0);
       for (const [key, count] of Object.entries(entry.sounds ?? {})) {
         aggregated.sounds[key] = (aggregated.sounds[key] ?? 0) + count;
+        if (aggregated.sounds[key] > aggregated.maxSound) aggregated.maxSound = aggregated.sounds[key];
       }
     }
   }

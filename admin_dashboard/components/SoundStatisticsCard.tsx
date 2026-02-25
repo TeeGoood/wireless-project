@@ -15,7 +15,7 @@ function ChartIcon() {
 export function SoundStatisticsCard({ className }: { className?: string }) {
   const { loading, stats } = useDashboardFirebase();
   const sounds = loading ? {} : stats?.sounds ?? {};
-  const BAR_MAX = loading ? 0 : stats?.sendSound ?? 0;
+  const BAR_MAX = stats?.maxSound ?? 0;
 
   const rows = Object.entries(sounds)
     .map(([label, value]) => ({ label, value: Number(value) }))
@@ -28,6 +28,7 @@ export function SoundStatisticsCard({ className }: { className?: string }) {
       className={className}
     >
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden min-w-0 gap-3 sm:gap-4">
+        <p className="text-2xl font-bold text-darkTeal">{loading ? '...' : (stats?.sendSound ?? 0)} sounds sent</p>
         {rows.map(({ label, value }) => {
           const percent = BAR_MAX > 0 ? Math.min(100, (value / BAR_MAX) * 100) : 0;
           return (

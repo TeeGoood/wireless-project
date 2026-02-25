@@ -18,7 +18,7 @@ interface FirebaseStat {
 export type UsersMap = Record<string, FirebaseUser>;
 
 export type StatsMap = Record<string, FirebaseStat>;
-export type StatsStruct = FirebaseStat;
+export type StatsStruct = FirebaseStat & { maxSound: number };
 
 /** Root shape if you read the whole DB; currently only `users` is used. */
 export interface FirebaseDatabase {
