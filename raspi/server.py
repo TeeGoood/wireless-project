@@ -87,7 +87,52 @@ class OnlinePresence:
                 logger.exception("Failed to update online presence in Firebase")
 
 
-online_presence = OnlinePresence(manager, interval=5)
+online_presence = OnlinePresence(manager, interval=20)
+
+
+class EventStats:
+    """Track counts for every RF24 event type and push to Firebase.
+
+    Data is stored at /stats/{car_id} and is never cleaned up on shutdown
+    because it is historical.  Existing counts are loaded from Firebase on
+    start so counters survive server restarts.
+    """
+
+    def __init__(self, rf24_manager: RF24Manager) -> None:
+        self._manager = rf24_manager
+        self._counts: dict[str, int] = {}
+
+    @property
+    def _ref_path(self) -> str:
+        return f"stats/{self._manager.get_info()['car_id']}"
+
+    def start(self) -> None:
+        """Load existing counts from Firebase (if any)."""
+        try:
+            data = firebase.get(self._ref_path)
+            if isinstance(data, dict):
+                self._counts = {k: int(v) for k, v in data.items()}
+            logger.info("Loaded event stats from /%s: %s", self._ref_path, self._counts)
+        except Exception:
+            logger.exception("Failed to load event stats from Firebase")
+
+    def record(self, event: dict) -> None:
+        """Increment the counter for the event's type and push to Firebase."""
+        event_type = event.get("type", "")
+        if not event_type:
+            return
+        self._counts[event_type] = self._counts.get(event_type, 0) + 1
+        self._push()
+
+    def _push(self) -> None:
+        try:
+            firebase.set(self._ref_path, self._counts)
+            logger.info("Updated event stats at /%s: %s", self._ref_path, self._counts)
+        except Exception:
+            logger.exception("Failed to push event stats to Firebase")
+
+
+event_stats = EventStats(manager)
 
 
 @asynccontextmanager
@@ -95,6 +140,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     manager.start(loop, event_queue)
     forwarder = asyncio.create_task(_event_forwarder(), name="rf24-event-forwarder")
+    event_stats.start()
     online_presence.start()
     logger.info("Server started")
     yield
@@ -193,6 +239,7 @@ async def websocket_user_endpoint(websocket: WebSocket, username: str):
 async def _handle_client_event(ws: WebSocket, event: dict) -> None:
     t = event.get("type")
     p = event.get("payload", {})
+    event_stats.record(event)
 
     match t:
         case "changeInfo":
@@ -238,6 +285,7 @@ async def _event_forwarder() -> None:
     """Drain the RF24 event queue and fan out to all WebSocket clients."""
     while True:
         event = await event_queue.get()
+        event_stats.record(event)
         await _broadcast(event)
 
 
