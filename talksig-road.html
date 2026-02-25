@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Talksig Road</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #e8e8e8;
+      min-height: 100vh;
+      padding: 2rem;
+      color: #333;
+    }
+    .page-label {
+      position: fixed;
+      top: 1rem;
+      left: 1rem;
+      font-size: 0.85rem;
+      color: #888;
+      z-index: 10;
+    }
+    .page {
+      display: none;
+      max-width: 900px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 2rem;
+    }
+    .page.active {
+      display: block;
+    }
+    .page-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .page-title + hr {
+      border: none;
+      border-top: 1px solid #e0e0e0;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Page 1: Login form */
+    .form-card {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    .form-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .form-card h3 .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ddd;
+      font-size: 0.75rem;
+      font-style: italic;
+    }
+    .form-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      gap: 1rem;
+    }
+    .form-row label {
+      flex-shrink: 0;
+      font-size: 0.95rem;
+    }
+    .form-row input {
+      flex: 1;
+      max-width: 240px;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+    .form-card .btn-confirm {
+      display: block;
+      margin: 1.25rem auto 0;
+      padding: 0.6rem 2rem;
+      background: #6b8f71;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .form-card .btn-confirm:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    .field-error {
+      border-color: #c94a4a !important;
+    }
+
+    /* Page 2: Control panel */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e8e8e8;
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    .card-header {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .card-header .icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #e0e0e0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-style: italic;
+    }
+    .card-header .icon-refresh {
+      margin-left: auto;
+      cursor: pointer;
+      background: transparent;
+      font-style: normal;
+    }
+    .info-list {
+      list-style: none;
+    }
+    .info-list li {
+      padding: 0.35rem 0;
+      font-size: 0.95rem;
+    }
+    .status-active {
+      color: #2a8a4a;
+      font-weight: 500;
+    }
+    .btn-edit {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      background: #e8e8e8;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .btn-disconnect {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding: 0.5rem 1rem;
+      background: #c94a4a;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .btn-disconnect:hover {
+      background: #a83d3d;
+    }
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .request-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      font-size: 0.95rem;
+    }
+    .request-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .btn-deny, .btn-accept {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+    }
+    .btn-deny { background: #e05c5c; color: #fff; }
+    .btn-accept { background: #2a8a4a; color: #fff; }
+    .connection-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      font-size: 0.95rem;
+    }
+    .btn-link {
+      width: 24px;
+      height: 24px;
+      background: #7eb8da;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 0.75rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Page 3: Soundboard */
+    .soundboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+    }
+    .soundboard-grid button {
+      padding: 0.6rem 0.75rem;
+      background: #8fa89e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-align: center;
+    }
+    .conversation-panel .message-bubble {
+      background: #8fa89e;
+      color: #fff;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.95rem;
+    }
+    .conversation-panel hr {
+      border: none;
+      border-top: 1px solid #e0e0e0;
+      margin: 1rem 0;
+    }
+    .conversation-input-wrapper {
+      color: #666;
+      font-size: 0.9rem;
+    }
+    .conversation-input {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .conversation-input input {
+      flex: 1;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .btn-send-chat {
+      padding: 0.5rem 0.75rem;
+      background: #8fa89e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.5rem 1rem;
+      background: #333;
+      color: #fff;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { background: #c94a4a; }
+    #conversation-messages { min-height: 80px; }
+  </style>
+</head>
+<body>
+  <!-- Page 1: User Log In -->
+  <section id="page-login" class="page active">
+    <span class="page-label">User Log In</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="form-card">
+      <h3><span class="info-icon">i</span> Enter Your Information</h3>
+      <div class="form-row">
+        <label for="name">Your Name:</label>
+        <input type="text" id="name" value="Jimmy" />
+      </div>
+      <div class="form-row">
+        <label for="car-model">Car Model:</label>
+        <input type="text" id="car-model" value="Toyota" />
+      </div>
+      <div class="form-row">
+        <label for="car-colour">Car Colour:</label>
+        <input type="text" id="car-colour" value="Black" />
+      </div>
+      <div class="form-row">
+        <label for="license">License Plate:</label>
+        <input type="text" id="license" value="1 AA 2000" />
+      </div>
+      <button type="button" class="btn-confirm">Confirm</button>
+    </div>
+  </section>
+
+  <!-- Page 2: User Control Panel -->
+  <section id="page-control" class="page">
+    <span class="page-label">User Control Panel</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="two-col">
+      <div class="left-col">
+        <div class="card">
+          <div class="card-header"><span class="icon">i</span> General Info</div>
+          <ul class="info-list" id="general-info-list">
+            <li>Signal Range: 15 meters</li>
+            <li>Status: <span class="status-active" id="general-status">—</span></li>
+            <li>Your License Plate: <span id="general-plate">—</span></li>
+            <li>Your Car: <span id="general-car">—</span></li>
+          </ul>
+          <button type="button" class="btn-edit" id="btn-edit-profile">✎ Edit Profile</button>
+        </div>
+      </div>
+      <div class="right-col">
+        <div class="card">
+          <div class="card-header">↻ Incoming Connection Requests</div>
+          <div id="incoming-requests-container"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">⊞ Available Connections <span class="icon icon-refresh" id="btn-refresh-nearby" title="Refresh">↻</span></div>
+          <div id="nearby-list-container"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Page 3: User Soundboard -->
+  <section id="page-soundboard" class="page">
+    <span class="page-label">User Soundboard</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><span class="icon">i</span> Soundboard</div>
+        <div class="soundboard-grid">
+          <button type="button">สวัสดี</button>
+          <button type="button">ช่วยเคลื่อนรถไป</button>
+          <button type="button">ข้างหน้า</button>
+          <button type="button">ข้างหลัง</button>
+          <button type="button">ซ้าย</button>
+          <button type="button">ขวา</button>
+          <button type="button">เทียบกับ</button>
+          <button type="button">ฉัน</button>
+          <button type="button">คุณ</button>
+          <button type="button">เลี้ยว</button>
+          <button type="button">ถอย</button>
+          <button type="button">ไป</button>
+          <button type="button">โอเค</button>
+          <button type="button">ไม่</button>
+          <button type="button">ใช่</button>
+        </div>
+        <button type="button" class="btn-disconnect" id="btn-disconnect">Disconnect</button>
+      </div>
+      <div class="card conversation-panel">
+        <div class="card-header">🕐 <span id="conversation-title">Conversation</span></div>
+        <div id="conversation-messages"></div>
+        <hr />
+        <div class="conversation-input">
+          <input type="text" id="chat-input" placeholder="Type a message (max 26 chars)" maxlength="26" />
+          <button type="button" class="btn-send-chat" id="btn-send-chat" title="Send">▶</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script>
+    // ── WebSocket URL (same host as page, /ws; fallback for file://)
+    var wsHost = (location.hostname && location.hostname !== '') ? location.host : 'localhost:8000';
+    var wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + wsHost + '/ws';
+
+    var ws = null;
+    var app = {
+      carInfo: {},
+      state: '',
+      nearby: [],
+      incomingRequests: [],
+      connectedCarId: null,
+      connectedPeerName: '',
+      messages: []
+    };
+
+    function showPage(pageId) {
+      document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+      var el = document.getElementById('page-' + pageId);
+      if (el) el.classList.add('active');
+      if (pageId === 'control') {
+        renderGeneralInfo();
+        renderIncomingRequests();
+        renderNearby();
+      }
+      if (pageId === 'soundboard') {
+        document.getElementById('conversation-title').textContent = app.connectedPeerName ? (app.connectedPeerName + "'s Conversation") : 'Conversation';
+        renderMessages();
+      }
+    }
+
+    function toast(msg, isError) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.toggle('error', !!isError);
+      t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 3000);
+    }
+
+    function send(cmd) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        toast('Not connected to server', true);
+        return;
+      }
+      ws.send(JSON.stringify(cmd));
+    }
+
+    function renderGeneralInfo() {
+      var info = app.carInfo;
+      document.getElementById('general-plate').textContent = info.plate || '—';
+      document.getElementById('general-car').textContent = [info.model, info.color].filter(Boolean).join(' ') || '—';
+      var statusEl = document.getElementById('general-status');
+      statusEl.textContent = app.state || '—';
+      statusEl.className = app.state === 'connected' ? 'status-active' : '';
+    }
+
+    function renderIncomingRequests() {
+      var container = document.getElementById('incoming-requests-container');
+      if (!app.incomingRequests.length) {
+        container.innerHTML = '<div class="request-item"><span style="color:#888">No pending requests</span></div>';
+        return;
+      }
+      container.innerHTML = app.incomingRequests.map(function (r) {
+        var label = [r.owner, r.plate, r.color].filter(Boolean).join(' ') || r.plate || r.car_id;
+        return '<div class="request-item">' +
+          '<span>' + label + '</span>' +
+          '<div class="request-actions">' +
+          '<button type="button" class="btn-deny" title="Reject" data-car-id="' + r.car_id + '">✕</button>' +
+          '<button type="button" class="btn-accept" title="Accept" data-car-id="' + r.car_id + '">✓</button>' +
+          '</div></div>';
+      }).join('');
+      container.querySelectorAll('.btn-accept').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var carId = btn.getAttribute('data-car-id');
+          send({ type: 'acceptConnection', payload: { car_id: carId } });
+          app.incomingRequests = app.incomingRequests.filter(function (r) { return r.car_id !== carId; });
+          var peer = app.nearby.find(function (c) { return c.car_id === carId; }) || {};
+          app.connectedPeerName = peer.owner || peer.plate || carId;
+          app.connectedCarId = carId;
+          showPage('soundboard');
+        });
+      });
+      container.querySelectorAll('.btn-deny').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var carId = btn.getAttribute('data-car-id');
+          send({ type: 'rejectConnection', payload: { car_id: carId } });
+          app.incomingRequests = app.incomingRequests.filter(function (r) { return r.car_id !== carId; });
+          renderIncomingRequests();
+        });
+      });
+    }
+
+    function renderNearby() {
+      var container = document.getElementById('nearby-list-container');
+      if (!app.nearby.length) {
+        container.innerHTML = '<div class="connection-item"><span style="color:#888">No cars nearby — try scanning</span></div>';
+        return;
+      }
+      container.innerHTML = app.nearby.map(function (c) {
+        var label = [c.owner, c.plate, c.color].filter(Boolean).join(' ') || c.plate || c.car_id;
+        return '<div class="connection-item">' +
+          '<span>' + label + '</span>' +
+          '<button type="button" class="btn-link" title="Connect" data-car-id="' + c.car_id + '">⎋</button>' +
+          '</div>';
+      }).join('');
+      container.querySelectorAll('.btn-link').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var carId = btn.getAttribute('data-car-id');
+          send({ type: 'connect', payload: { car_id: carId } });
+        });
+      });
+    }
+
+    function renderMessages() {
+      var container = document.getElementById('conversation-messages');
+      if (!app.messages.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = app.messages.map(function (m) {
+        return '<div class="message-bubble">' + (m.text || m.kind) + '</div>';
+      }).join('');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function onMessage(ev) {
+      var event;
+      try {
+        event = JSON.parse(ev.data);
+      } catch (e) { return; }
+      var t = event.type;
+      var p = event.payload || {};
+
+      switch (t) {
+        case 'init':
+          app.carInfo = p.info || {};
+          app.state = p.state || '';
+          app.nearby = p.nearby || [];
+          app.incomingRequests = [];
+          renderGeneralInfo();
+          renderIncomingRequests();
+          renderNearby();
+          break;
+        case 'infoUpdated':
+          app.carInfo = Object.assign({}, app.carInfo, p);
+          renderGeneralInfo();
+          break;
+        case 'nearbyList':
+          app.nearby = p.cars || [];
+          renderNearby();
+          break;
+        case 'carDiscovered':
+        case 'carInfoUpdated':
+          var cid = p.car_id;
+          var idx = app.nearby.findIndex(function (c) { return c.car_id === cid; });
+          var entry = { car_id: cid, plate: p.plate, color: p.color, model: p.model, owner: p.owner };
+          if (idx >= 0) app.nearby[idx] = Object.assign({}, app.nearby[idx], entry);
+          else app.nearby.push(entry);
+          renderNearby();
+          break;
+        case 'connectionRequest':
+          app.incomingRequests.push({ car_id: p.car_id, plate: p.plate, owner: p.owner, color: p.color });
+          renderIncomingRequests();
+          break;
+        case 'connectionAccepted':
+          app.connectedCarId = p.car_id;
+          app.state = 'connected';
+          var peer = app.nearby.find(function (c) { return c.car_id === p.car_id; });
+          app.connectedPeerName = peer ? (peer.owner || peer.plate || p.car_id) : p.car_id;
+          showPage('soundboard');
+          break;
+        case 'connectionRejected':
+        case 'disconnected':
+          app.connectedCarId = null;
+          app.connectedPeerName = '';
+          app.state = (t === 'disconnected' ? '' : app.state);
+          renderGeneralInfo();
+          break;
+        case 'peerDisconnected':
+          app.connectedCarId = null;
+          app.connectedPeerName = '';
+          app.state = '';
+          toast('Peer disconnected');
+          showPage('control');
+          break;
+        case 'messageReceived':
+          if (p.kind === 'text' && p.text) {
+            app.messages.push({ text: p.text, from: p.car_id });
+            renderMessages();
+          }
+          break;
+        case 'error':
+          toast(p.message || 'Error', true);
+          break;
+        default:
+          break;
+      }
+    }
+
+    function connect() {
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+      ws = new WebSocket(wsUrl);
+      ws.onopen = function () { toast('Connected'); };
+      ws.onclose = function () { toast('Disconnected', true); };
+      ws.onerror = function () { toast('Connection error', true); };
+      ws.onmessage = onMessage;
+    }
+
+    // ── Login form
+    var formInputs = document.querySelectorAll('#page-login .form-row input');
+    var btnConfirm = document.querySelector('.btn-confirm');
+
+    function allFieldsFilled() {
+      return Array.from(formInputs).every(function (input) { return input.value.trim() !== ''; });
+    }
+    function updateConfirmState() {
+      btnConfirm.disabled = !allFieldsFilled();
+      formInputs.forEach(function (input) {
+        input.classList.toggle('field-error', input.value.trim() === '');
+      });
+    }
+    formInputs.forEach(function (input) {
+      input.addEventListener('input', updateConfirmState);
+      input.addEventListener('blur', updateConfirmState);
+    });
+    updateConfirmState();
+
+    btnConfirm.addEventListener('click', function () {
+      if (!allFieldsFilled()) return;
+      var owner = document.getElementById('name').value.trim();
+      var model = document.getElementById('car-model').value.trim();
+      var color = document.getElementById('car-colour').value.trim();
+      var plate = document.getElementById('license').value.trim();
+      connect();
+      function doSubmit() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          send({ type: 'changeInfo', payload: { owner: owner, model: model, color: color, plate: plate } });
+          showPage('control');
+          send({ type: 'getInfo', payload: {} });
+          send({ type: 'scan', payload: {} });
+          send({ type: 'getNearby', payload: {} });
+        } else {
+          setTimeout(doSubmit, 100);
+        }
+      }
+      setTimeout(doSubmit, 100);
+    });
+
+    // ── Control panel: refresh nearby
+    document.getElementById('btn-refresh-nearby').addEventListener('click', function () {
+      send({ type: 'getNearby', payload: {} });
+      send({ type: 'beacon', payload: {} });
+    });
+
+    document.getElementById('btn-edit-profile').addEventListener('click', function () {
+      document.getElementById('name').value = app.carInfo.owner || '';
+      document.getElementById('car-model').value = app.carInfo.model || '';
+      document.getElementById('car-colour').value = app.carInfo.color || '';
+      document.getElementById('license').value = app.carInfo.plate || '';
+      showPage('login');
+    });
+
+    // ── Soundboard: phrase buttons → sendText
+    document.querySelectorAll('.soundboard-grid button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var text = btn.textContent.trim();
+        if (text) send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
+      });
+    });
+
+    document.getElementById('btn-send-chat').addEventListener('click', function () {
+      var input = document.getElementById('chat-input');
+      var text = input.value.trim();
+      if (!text) return;
+      send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
+      input.value = '';
+    });
+    document.getElementById('chat-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') document.getElementById('btn-send-chat').click();
+    });
+
+    document.getElementById('btn-disconnect').addEventListener('click', function () {
+      send({ type: 'disconnect', payload: {} });
+      app.connectedCarId = null;
+      app.connectedPeerName = '';
+      app.messages = [];
+      showPage('login');
+    });
+
+    connect();
+  </script>
+</body>
+</html>

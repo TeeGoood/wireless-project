@@ -1,103 +1,298 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>FastAPI Interactive Page</title>
+<head>
+<meta charset="UTF-8">
+<title>Talksig Road</title>
 
-    <style>
-      body {
-        margin: 0;
-        height: 100vh;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        font-family: Arial, Helvetica, sans-serif;
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-      }
+<style>
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #bfc9c9;
+}
 
-      .card {
-        background: rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(10px);
-        padding: 40px;
-        border-radius: 16px;
-        text-align: center;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-        width: 320px;
-      }
+.wrapper {
+  width: 90%;
+  margin: 40px auto;
+  background: #e5e7e7;
+  border-radius: 30px;
+  padding: 40px;
+}
 
-      h1 {
-        margin-top: 0;
-      }
+h1 {
+  font-size: 42px;
+  margin: 0;
+}
 
-      .counter {
-        font-size: 48px;
-        margin: 20px 0;
-        font-weight: bold;
-      }
+hr {
+  margin: 20px 0 40px 0;
+}
 
-      button {
-        background: white;
-        border: none;
-        padding: 12px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 16px;
-        margin: 6px;
-        transition: 0.2s;
-      }
+.page { display: none; }
+.page.active { display: block; }
 
-      button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 12px rgba(0, 0, 0, 0.2);
-      }
+.card {
+  background: #f2f4f4;
+  border-radius: 20px;
+  padding: 25px;
+  border: 1px solid #9ea7a7;
+}
 
-      .inc {
-        color: #16a34a;
-      }
-      .dec {
-        color: #dc2626;
-      }
+.flex {
+  display: flex;
+  gap: 40px;
+}
 
-      .msg {
-        margin-top: 15px;
-        opacity: 0.85;
-        font-size: 14px;
-      }
-    </style>
-  </head>
+button {
+  padding: 8px 18px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  background: #8fa3a8;
+  color: white;
+}
 
-  <body>
-    <div class="card">
-      <h1>FastAPI Demo 🚀</h1>
+button:hover { opacity: 0.8; }
 
-      <div id="counter" class="counter">0</div>
+.form-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+}
 
-      <div>
-        <button class="inc" onclick="change(1)">+ Increase</button>
-        <button class="dec" onclick="change(-1)">- Decrease</button>
-      </div>
+.form-row input {
+  width: 55%;
+  padding: 6px 10px;
+  border-radius: 15px;
+  border: 1px solid #9ea7a7;
+  background: #e0e4e4;
+}
 
-      <div class="msg" id="message">Click buttons to interact</div>
-    </div>
+.error { color: red; margin-top: 10px; }
 
-    <script>
-      let count = 0;
+.chat-box {
+  background: white;
+  border-radius: 15px;
+  padding: 15px;
+  border: 1px solid #9ea7a7;
+  min-height: 250px;
+  overflow-y: auto;
+  margin-top: 15px;
+}
 
-      function change(delta) {
-        count += delta;
-        document.getElementById("counter").innerText = count;
+.message { margin: 8px 0; }
+.user { text-align: right; }
+.bot { text-align: left; }
 
-        const msg = document.getElementById("message");
+.soundboard-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 15px;
+}
 
-        if (count > 0) {
-          msg.innerText = "Positive vibes 😎";
-        } else if (count < 0) {
-          msg.innerText = "Below zero 🧊";
-        } else {
-          msg.innerText = "Perfectly balanced ⚖️";
-        }
-      }
-    </script>
-  </body>
+.soundboard-grid button {
+  padding: 6px 12px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="wrapper">
+<h1>Talksig Road</h1>
+<hr>
+
+<!-- PAGE 1: ENTER INFO -->
+<div id="page1" class="page active">
+<div class="card">
+<h2>Enter Your Information</h2>
+
+<div class="form-row">
+<label>Name</label>
+<input id="name">
+</div>
+
+<div class="form-row">
+<label>Car Model</label>
+<input id="model">
+</div>
+
+<div class="form-row">
+<label>Car Colour</label>
+<input id="color">
+</div>
+
+<div class="form-row">
+<label>License Plate</label>
+<input id="plate">
+</div>
+
+<div id="error1" class="error"></div>
+<br>
+<button onclick="validateAndGo()">Confirm</button>
+</div>
+</div>
+
+<!-- PAGE 2: DASHBOARD (MISSING PAGE ADDED) -->
+<div id="page2" class="page">
+<div class="flex">
+
+<!-- General Info -->
+<div class="card" style="flex:1;">
+<h3>General Info</h3>
+<p>Signal Range: 15 meters</p>
+<p>Status: <span style="color:green;">Active</span></p>
+<p id="displayPlate"></p>
+<p id="displayCar"></p>
+
+<br>
+<button onclick="goToEdit()">Edit Profile</button>
+</div>
+
+<!-- Connections -->
+<div style="flex:1; display:flex; flex-direction:column; gap:30px;">
+
+<div class="card">
+<h3>Incoming Connection Requests</h3>
+<br>
+<button onclick="goToChat()">✔ Accept Request</button>
+</div>
+
+<div class="card">
+<h3>Available Connections</h3>
+<p>Kai — 1กค0001 — red — 15 meters away</p>
+<p>Kook — 1กค0010 — red — 10 meters away</p>
+</div>
+
+</div>
+</div>
+</div>
+
+<!-- PAGE 3: CHAT + SOUNDBOARD -->
+<div id="page3" class="page">
+<div class="flex">
+
+<div class="card" style="flex:1;">
+<h3>Soundboard</h3>
+
+<div class="soundboard-grid">
+<button onclick="sendInstant('สวัสดี')">สวัสดี</button>
+<button onclick="sendInstant('ช่วยเคลื่อนรถไปข้างหน้า')">ช่วยเคลื่อนรถไปข้างหน้า</button>
+<button onclick="sendInstant('ช่วยเคลื่อนรถไปข้างหลัง')">ช่วยเคลื่อนรถไปข้างหลัง</button>
+<button onclick="sendInstant('เลี้ยวซ้าย')">เลี้ยวซ้าย</button>
+<button onclick="sendInstant('เลี้ยวขวา')">เลี้ยวขวา</button>
+<button onclick="sendInstant('โอเค')">โอเค</button>
+<button onclick="sendInstant('ไม่ใช่')">ไม่ใช่</button>
+</div>
+
+<br>
+<button onclick="backToDashboard()">Back</button>
+</div>
+
+<div class="card" style="flex:1;">
+<h3>Conversation</h3>
+<div id="chat" class="chat-box"></div>
+</div>
+
+</div>
+</div>
+
+<!-- PAGE 4: EDIT PROFILE -->
+<div id="page4" class="page">
+<div class="card">
+<h2>Edit Profile</h2>
+
+<div class="form-row">
+<label>Name</label>
+<input id="edit_name">
+</div>
+
+<div class="form-row">
+<label>Car Model</label>
+<input id="edit_model">
+</div>
+
+<div class="form-row">
+<label>Car Colour</label>
+<input id="edit_color">
+</div>
+
+<div class="form-row">
+<label>License Plate</label>
+<input id="edit_plate">
+</div>
+
+<div id="error4" class="error"></div>
+<br>
+<button onclick="saveProfile()">Save</button>
+</div>
+</div>
+
+</div>
+
+<script>
+
+function switchPage(from,to){
+document.getElementById(from).classList.remove("active");
+document.getElementById(to).classList.add("active");
+}
+
+function validateAndGo(){
+let name=nameInput();
+let model=modelInput();
+let color=colorInput();
+let plate=plateInput();
+
+if(!name||!model||!color||!plate){
+document.getElementById("error1").innerText="All fields required!";
+return;
+}
+
+document.getElementById("displayPlate").innerText="Your License Plate: "+plate;
+document.getElementById("displayCar").innerText="Your Car: "+model+" ("+color+")";
+
+switchPage("page1","page2");
+}
+
+function goToChat(){ switchPage("page2","page3"); }
+function backToDashboard(){ switchPage("page3","page2"); }
+function goToEdit(){
+edit_name.value=nameInput();
+edit_model.value=modelInput();
+edit_color.value=colorInput();
+edit_plate.value=plateInput();
+switchPage("page2","page4");
+}
+
+function saveProfile(){
+if(!edit_name.value||!edit_model.value||!edit_color.value||!edit_plate.value){
+document.getElementById("error4").innerText="All fields required!";
+return;
+}
+name.value=edit_name.value;
+model.value=edit_model.value;
+color.value=edit_color.value;
+plate.value=edit_plate.value;
+switchPage("page4","page2");
+}
+
+function sendInstant(text){
+const chat=document.getElementById("chat");
+let msg=document.createElement("div");
+msg.className="message user";
+msg.innerText=text;
+chat.appendChild(msg);
+chat.scrollTop=chat.scrollHeight;
+}
+
+// shortcuts
+function nameInput(){return document.getElementById("name").value.trim();}
+function modelInput(){return document.getElementById("model").value.trim();}
+function colorInput(){return document.getElementById("color").value.trim();}
+function plateInput(){return document.getElementById("plate").value.trim();}
+
+</script>
+
+</body>
 </html>
