@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import pydantic
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -39,13 +40,50 @@ connected_clients: list[WebSocket] = []
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 
 
+def _build_online_payload() -> dict:
+    """Build the presence payload with a last_seen timestamp."""
+    info = manager.get_info()
+    info["last_seen"] = datetime.now().strftime("%d-%b-%Y:%H:%M")
+    return info
+
+
+def _online_ref_path() -> str:
+    """Return the Firebase path for this car's online entry."""
+    return f"online/{manager.get_info()['car_id']}"
+
+
+async def _firebase_online_pusher() -> None:
+    """Keep this car's /online/{car_id} entry alive with a fresh last_seen every 60s."""
+    while True:
+        try:
+            if len(connected_clients) > 0:
+                payload = _build_online_payload()
+                firebase.set(_online_ref_path(), payload)
+                logger.info("Updated online presence at /%s", _online_ref_path())
+        except Exception:
+            logger.exception("Failed to update online presence in Firebase")
+        await asyncio.sleep(5)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     manager.start(loop, event_queue)
     forwarder = asyncio.create_task(_event_forwarder(), name="rf24-event-forwarder")
+    online_pusher = asyncio.create_task(
+        _firebase_online_pusher(), name="firebase-online-pusher"
+    )
     logger.info("Server started")
     yield
+    online_pusher.cancel()
+
+    # Remove online presence on shutdown
+    try:
+        firebase.set(_online_ref_path(), None)
+        logger.info("Removed online presence at /%s", _online_ref_path())
+    except Exception:
+        logger.exception("Failed to remove online presence on shutdown")
+
     forwarder.cancel()
     manager.stop()
     logger.info("Server stopped")
@@ -86,14 +124,17 @@ async def websocket_endpoint(ws: WebSocket):
     connected_clients.append(ws)
     logger.info("WebSocket client connected (%d total)", len(connected_clients))
 
-    await _send(ws, {
-        "type": "init",
-        "payload": {
-            "info":   manager.get_info(),
-            "nearby": manager.get_nearby(),
-            "state":  manager.get_state(),
+    await _send(
+        ws,
+        {
+            "type": "init",
+            "payload": {
+                "info": manager.get_info(),
+                "nearby": manager.get_nearby(),
+                "state": manager.get_state(),
+            },
         },
-    })
+    )
 
     try:
         while True:
@@ -110,7 +151,9 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if ws in connected_clients:
             connected_clients.remove(ws)
-        logger.info("WebSocket client disconnected (%d remaining)", len(connected_clients))
+        logger.info(
+            "WebSocket client disconnected (%d remaining)", len(connected_clients)
+        )
 
 
 # ── WebSocket – Firebase user session ─────────────────────────────────────────
@@ -146,10 +189,12 @@ async def _handle_client_event(ws: WebSocket, event: dict) -> None:
         case "beacon":
             manager.handle_beacon()
         case "getNearby":
-            await _broadcast({
-                "type": "nearbyList",
-                "payload": {"cars": manager.get_nearby()},
-            })
+            await _broadcast(
+                {
+                    "type": "nearbyList",
+                    "payload": {"cars": manager.get_nearby()},
+                }
+            )
         case "connect":
             manager.handle_connect(p.get("car_id", ""))
         case "acceptConnection":
