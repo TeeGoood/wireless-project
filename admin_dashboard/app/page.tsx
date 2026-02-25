@@ -2,7 +2,7 @@
 
 import { PageFrame } from '@/components/PageFrame';
 import { TotalUsersCard } from '@/components/TotalUsersCard';
-import { GraphicStatisticsCard } from '@/components/GraphicStatisticsCard';
+import { SoundStatisticsCard } from '@/components/SoundStatisticsCard';
 import {ConnectionStatisticsCard } from '@/components/ConnectionStatisticsCard';
 
 export default function MainDashboardPage() {
@@ -16,7 +16,7 @@ export default function MainDashboardPage() {
           <ConnectionStatisticsCard />
         </div>
         <div className="min-h-0 min-w-0 flex flex-col h-full overflow-hidden">
-          <GraphicStatisticsCard className="h-full" />
+          <SoundStatisticsCard className="h-full" />
         </div>
       </div>
     </PageFrame>
