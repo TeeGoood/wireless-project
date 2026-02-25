@@ -40,29 +40,54 @@ connected_clients: list[WebSocket] = []
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 
 
-def _build_online_payload() -> dict:
-    """Build the presence payload with a last_seen timestamp."""
-    info = manager.get_info()
-    info["last_seen"] = datetime.now().strftime("%d-%b-%Y:%H:%M")
-    return info
+class OnlinePresence:
+    """Manages this car's online presence in Firebase at /online/{car_id}."""
 
+    def __init__(self, rf24_manager: RF24Manager, interval: float = 60) -> None:
+        self._manager = rf24_manager
+        self._interval = interval
+        self._task: asyncio.Task | None = None
 
-def _online_ref_path() -> str:
-    """Return the Firebase path for this car's online entry."""
-    return f"online/{manager.get_info()['car_id']}"
+    @property
+    def _ref_path(self) -> str:
+        return f"online/{self._manager.get_info()['car_id']}"
 
+    def _build_payload(self) -> dict:
+        info = self._manager.get_info()
+        info["last_seen"] = datetime.now().isoformat()
+        return info
 
-async def _firebase_online_pusher() -> None:
-    """Keep this car's /online/{car_id} entry alive with a fresh last_seen every 60s."""
-    while True:
+    def start(self) -> None:
+        """Register presence immediately and start the background heartbeat."""
         try:
-            if len(connected_clients) > 0:
-                payload = _build_online_payload()
-                firebase.set(_online_ref_path(), payload)
-                logger.info("Updated online presence at /%s", _online_ref_path())
+            firebase.set(self._ref_path, self._build_payload())
+            logger.info("Registered online presence at /%s", self._ref_path)
         except Exception:
-            logger.exception("Failed to update online presence in Firebase")
-        await asyncio.sleep(5)
+            logger.exception("Failed to register online presence on startup")
+        self._task = asyncio.create_task(self._loop(), name="firebase-online-pusher")
+
+    def stop(self) -> None:
+        """Cancel the heartbeat and remove presence from Firebase."""
+        if self._task:
+            self._task.cancel()
+            self._task = None
+        try:
+            firebase.set(self._ref_path, None)
+            logger.info("Removed online presence at /%s", self._ref_path)
+        except Exception:
+            logger.exception("Failed to remove online presence on shutdown")
+
+    async def _loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._interval)
+            try:
+                firebase.set(self._ref_path, self._build_payload())
+                logger.info("Updated online presence at /%s", self._ref_path)
+            except Exception:
+                logger.exception("Failed to update online presence in Firebase")
+
+
+online_presence = OnlinePresence(manager, interval=5)
 
 
 @asynccontextmanager
@@ -70,20 +95,10 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     manager.start(loop, event_queue)
     forwarder = asyncio.create_task(_event_forwarder(), name="rf24-event-forwarder")
-    online_pusher = asyncio.create_task(
-        _firebase_online_pusher(), name="firebase-online-pusher"
-    )
+    online_presence.start()
     logger.info("Server started")
     yield
-    online_pusher.cancel()
-
-    # Remove online presence on shutdown
-    try:
-        firebase.set(_online_ref_path(), None)
-        logger.info("Removed online presence at /%s", _online_ref_path())
-    except Exception:
-        logger.exception("Failed to remove online presence on shutdown")
-
+    online_presence.stop()
     forwarder.cancel()
     manager.stop()
     logger.info("Server stopped")
