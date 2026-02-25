@@ -101,6 +101,7 @@ class EventStats:
     def __init__(self, rf24_manager: RF24Manager) -> None:
         self._manager = rf24_manager
         self._counts: dict[str, int] = {}
+        self._sounds: dict[str, int] = {}
 
     @property
     def _ref_path(self) -> str:
@@ -111,7 +112,10 @@ class EventStats:
         try:
             data = firebase.get(self._ref_path)
             if isinstance(data, dict):
+                sounds = data.pop("sounds", None)
                 self._counts = {k: int(v) for k, v in data.items()}
+                if isinstance(sounds, dict):
+                    self._sounds = {k: int(v) for k, v in sounds.items()}
             logger.info("Loaded event stats from /%s: %s", self._ref_path, self._counts)
         except Exception:
             logger.exception("Failed to load event stats from Firebase")
@@ -124,9 +128,16 @@ class EventStats:
         self._counts[event_type] = self._counts.get(event_type, 0) + 1
         self._push()
 
+    def record_sound(self, sound_id: int) -> None:
+        """Increment the counter for a specific sound_id."""
+        key = str(sound_id)
+        self._sounds[key] = self._sounds.get(key, 0) + 1
+        self._push()
+
     def _push(self) -> None:
         try:
-            firebase.set(self._ref_path, self._counts)
+            payload = {**self._counts, "sounds": self._sounds}
+            firebase.set(self._ref_path, payload)
             logger.info("Updated event stats at /%s: %s", self._ref_path, self._counts)
         except Exception:
             logger.exception("Failed to push event stats to Firebase")
@@ -268,7 +279,9 @@ async def _handle_client_event(ws: WebSocket, event: dict) -> None:
         case "sendText":
             manager.handle_send_text(str(p.get("text", "")))
         case "sendSound":
-            manager.handle_send_sound(int(p.get("sound_id", 0)))
+            sound_id = int(p.get("sound_id", 0))
+            manager.handle_send_sound(sound_id)
+            event_stats.record_sound(sound_id)
         case "sendHonk":
             manager.handle_send_honk()
         case "sendPing":
