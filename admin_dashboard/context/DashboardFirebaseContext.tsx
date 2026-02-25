@@ -37,12 +37,16 @@ function computeOnlineCount(users: UsersMap | null): number {
 
 export function computeAggregatedStats(stats: StatsMap | null): StatsStruct | null {
   if (!stats || typeof stats !== 'object') return null;
-  const aggregated: StatsStruct = { connect: 0, error: 0, getInfo: 0 };
+  const aggregated: StatsStruct = { connect: 0, error: 0, getInfo: 0, sendSound: 0, sounds: {} };
   for (const entry of Object.values(stats)) {
     if (entry && typeof entry === 'object') {
       aggregated.connect += Number(entry.connect ?? 0);
       aggregated.error += Number(entry.error ?? 0);
       aggregated.getInfo += Number(entry.getInfo ?? 0);
+      aggregated.sendSound += Number(entry.sendSound ?? 0);
+      for (const [key, count] of Object.entries(entry.sounds ?? {})) {
+        aggregated.sounds[key] = (aggregated.sounds[key] ?? 0) + count;
+      }
     }
   }
   return aggregated;

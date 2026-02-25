@@ -11,6 +11,8 @@ interface FirebaseStat {
   connect:number;
   error:number;
   getInfo:number;
+  sendSound:number;
+  sounds: Record<string, number>;
 }
 
 export type UsersMap = Record<string, FirebaseUser>;

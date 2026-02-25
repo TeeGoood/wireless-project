@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { DashboardCard } from './DashboardCard';
+import { useDashboardFirebase } from '@/context/DashboardFirebaseContext';
 
 function ChartIcon() {
   return (
@@ -11,14 +12,12 @@ function ChartIcon() {
   );
 }
 
-const ENTITIES = ['1', '2', '3', '4'];
-const defaultData = [5, 8, 2, 13];
-const BAR_MAX = Math.max(...defaultData);
-
 export function SoundStatisticsCard({ className }: { className?: string }) {
-  const [data] = useState(defaultData);
+  const { loading, stats } = useDashboardFirebase();
+  const data = loading ? [] : Object.values(stats?.sounds ?? {});
+  const BAR_MAX = stats?.sendSound ?? 0;
 
-  const rows = ENTITIES.map((label, i) => ({ label, value: data[i] ?? 0 }))
+  const rows = Object.entries(data).map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value);
 
   return (
