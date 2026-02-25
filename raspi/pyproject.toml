@@ -11,3 +11,11 @@ dependencies = [
     "uvicorn>=0.41.0",
     "websockets>=16.0",
 ]
+
+[dependency-groups]
+dev = ["setuptools>=82.0.0"]
+
+[tool.setuptools.packages.find]
+# vendor/ contains the pyrf24 C++ source tree, not a Python package.
+# Without this, setuptools sees ['rf24', 'vendor'] and refuses to build raspi.
+exclude = ["vendor*"]

@@ -1,1 +1,4 @@
 firebase-key.json
+config.txt
+**/__pycache__/
+vendor/

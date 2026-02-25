@@ -1,4 +1,0 @@
-color=Unknown
-plate=UNKNOWN
-model=Unknown
-owner=Unknown

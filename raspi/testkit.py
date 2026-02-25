@@ -127,6 +127,15 @@ def print_event(event: dict) -> None:
         case "connectionRejected":
             print(f"\n{_ts()} {red('✗ Connection rejected')} by {cyan(p.get('car_id','?'))}")
 
+        case "connectionCancelled":
+            print(f"\n{_ts()} {yellow('↯ Connection cancelled')} – {cyan(p.get('car_id','?'))} withdrew the request")
+
+        case "carExpired":
+            print(f"\n{_ts()} {dim('◌ Car expired')}  id={cyan(p.get('car_id','?'))} (out of range)")
+
+        case "messageFailed":
+            print(f"\n{_ts()} {red('✗ Message not delivered')}  kind={p.get('kind','?')} (TX failed – peer may be out of range)")
+
         case "disconnected":
             print(f"\n{_ts()} {yellow('↯ Disconnected')} (you initiated)")
 
