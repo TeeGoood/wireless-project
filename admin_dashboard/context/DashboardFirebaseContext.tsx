@@ -1,10 +1,11 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import type { UsersMap } from '@/lib/firebase-types';
+import type { StatsMap, StatsStruct, UsersMap } from '@/lib/firebase-types';
 
 export interface DashboardFirebaseValue {
   users: UsersMap | null;
+  stats: StatsStruct | null;
   onlineCount: number;
   loading: boolean;
   error: string | null;
@@ -13,6 +14,7 @@ export interface DashboardFirebaseValue {
 
 const defaultValue: DashboardFirebaseValue = {
   users: null,
+  stats: null,
   onlineCount: 0,
   loading: true,
   error: null,
@@ -31,6 +33,19 @@ function computeOnlineCount(users: UsersMap | null): number {
   return Object.entries(users).filter(
     ([, u]) => u && typeof u === 'object' && 'car_id' in u
   ).length;
+}
+
+export function computeAggregatedStats(stats: StatsMap | null): StatsStruct | null {
+  if (!stats || typeof stats !== 'object') return null;
+  const aggregated: StatsStruct = { connect: 0, error: 0, getInfo: 0 };
+  for (const entry of Object.values(stats)) {
+    if (entry && typeof entry === 'object') {
+      aggregated.connect += Number(entry.connect ?? 0);
+      aggregated.error += Number(entry.error ?? 0);
+      aggregated.getInfo += Number(entry.getInfo ?? 0);
+    }
+  }
+  return aggregated;
 }
 
 export interface DashboardFirebaseProviderProps {

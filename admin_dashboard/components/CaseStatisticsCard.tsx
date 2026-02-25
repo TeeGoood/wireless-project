@@ -1,5 +1,6 @@
 'use client';
 
+import { useDashboardFirebase } from '@/context/DashboardFirebaseContext';
 import { DashboardCard } from './DashboardCard';
 
 function DocumentIcon() {
@@ -10,48 +11,52 @@ function DocumentIcon() {
   );
 }
 
-const successfulCases = 486;
-const unsuccessfulCases = 24;
-const solvedPercent = successfulCases / (successfulCases + unsuccessfulCases);
-const successAngle = solvedPercent * 360;
-
 export function CaseStatisticsCard() {
+  const { loading, stats } = useDashboardFirebase();
+  const successfulCases = stats?.connect ?? 0;
+  const unsuccessfulCases = stats?.error ?? 0;
+  const totalCases = successfulCases + unsuccessfulCases;
+  const solvedPercent = totalCases > 0 ? successfulCases / totalCases : 0;
+  const r = 16;
+  const circumference = 2 * Math.PI * r;
+  const tealLength = loading ? circumference : circumference * solvedPercent;
+  const redLength = loading ? 0 : circumference * (1 - solvedPercent);
+
   return (
     <DashboardCard
-      title="Case Statistics"
+      title="Connection Statistics"
       icon={<DocumentIcon />}
     >
-      <p className="text-lg sm:text-2xl font-bold text-darkTeal mb-3 sm:mb-4">{(solvedPercent * 100).toFixed(2)}% of cases are solved</p>
+      <p className="text-lg sm:text-2xl font-bold text-darkTeal mb-3 sm:mb-4">{loading ? '...' : (solvedPercent * 100).toFixed(2)}% of connections are successful</p>
       <div className="flex flex-wrap items-center gap-3 sm:gap-6 min-w-0 flex-shrink-0">
         <div className="flex-shrink-0 relative w-20 h-20 sm:w-24 sm:h-24">
           <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="#CFD7C7" strokeWidth="3" />
+            <circle cx="18" cy="18" r={r} fill="none" stroke="#CFD7C7" strokeWidth="3" />
             <circle
               cx="18"
               cy="18"
-              r="16"
+              r={r}
               fill="none"
-              stroke="#70A9A1"
+              stroke="#DC2626"
               strokeWidth="3"
-              strokeDasharray={`${successAngle} ${360 - successAngle}`}
+              strokeDasharray={`0 ${tealLength} ${redLength}`}
               strokeLinecap="round"
             />
             <circle
               cx="18"
               cy="18"
-              r="16"
+              r={r}
               fill="none"
-              stroke="#DC2626"
+              stroke="#70A9A1"
               strokeWidth="3"
-              strokeDasharray={`${360 - successAngle} ${successAngle}`}
+              strokeDasharray={`${tealLength} ${redLength}`}
               strokeLinecap="round"
-              style={{ strokeDashoffset: -successAngle }}
             />
           </svg>
         </div>
         <div className="text-xs sm:text-sm min-w-0 leading-snug py-0.5">
-          <p className="text-darkTeal font-medium">{successfulCases} successful cases</p>
-          <p className="text-red-600">{unsuccessfulCases} unsuccessful cases</p>
+          <p className="text-darkTeal font-medium">{successfulCases} successful connections</p>
+          <p className="text-red-600">{unsuccessfulCases} unsuccessful connections</p>
         </div>
       </div>
     </DashboardCard>

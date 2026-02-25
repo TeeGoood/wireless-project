@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getFirebaseValue } from '@/lib/firebase';
-import type { UsersMap } from '@/lib/firebase-types';
-import { DashboardFirebaseProvider, computeOnlineCount } from '@/context/DashboardFirebaseContext';
+import type { StatsMap, UsersMap } from '@/lib/firebase-types';
+import { DashboardFirebaseProvider, computeAggregatedStats, computeOnlineCount } from '@/context/DashboardFirebaseContext';
 
 function RefreshIcon() {
   return (
@@ -31,6 +31,7 @@ export interface PageBoxProps {
 export function PageBox({ title, children, onRefresh }: PageBoxProps) {
   const dateStr = formatPageDate(new Date());
   const [firebaseUsers, setFirebaseUsers] = useState<UsersMap | null>(null);
+  const [firebaseStats, setFirebaseStats] = useState<StatsMap | null>(null);
   const [firebaseLoading, setFirebaseLoading] = useState<boolean>(true);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
 
@@ -39,7 +40,9 @@ export function PageBox({ title, children, onRefresh }: PageBoxProps) {
     setFirebaseLoading(true);
     try {
       const users = await getFirebaseValue<UsersMap>('online');
+      const stats = await getFirebaseValue<StatsMap>('stats');
       setFirebaseUsers(users);
+      setFirebaseStats(stats);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch';
       setFirebaseError(msg);
@@ -62,6 +65,7 @@ export function PageBox({ title, children, onRefresh }: PageBoxProps) {
   const firebaseContextValue = useMemo(
     () => ({
       users: firebaseUsers,
+      stats: computeAggregatedStats(firebaseStats),
       onlineCount: computeOnlineCount(firebaseUsers),
       loading: firebaseLoading,
       error: firebaseError,
@@ -70,7 +74,7 @@ export function PageBox({ title, children, onRefresh }: PageBoxProps) {
         onRefresh?.();
       },
     }),
-    [firebaseUsers, firebaseLoading, firebaseError, fetchFirebase, onRefresh]
+    [firebaseUsers, firebaseStats, firebaseLoading, firebaseError, fetchFirebase, onRefresh]
   );
 
   return (

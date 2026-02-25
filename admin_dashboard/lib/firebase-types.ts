@@ -1,9 +1,4 @@
-/**
- * Matches your Realtime Database structure (e.g. users with name, age).
- * Extend when you add more root keys or user fields.
- */
-
-export interface FirebaseUser {
+interface FirebaseUser {
   car_id: string;
   color: string;
   last_seen: string;
@@ -12,10 +7,19 @@ export interface FirebaseUser {
   plate: string;
 }
 
-/** Map of user id → user (e.g. "user1" | "-Om31ZLtQ4KkxMjuTVZW" → FirebaseUser) */
+interface FirebaseStat {
+  connect:number;
+  error:number;
+  getInfo:number;
+}
+
 export type UsersMap = Record<string, FirebaseUser>;
+
+export type StatsMap = Record<string, FirebaseStat>;
+export type StatsStruct = FirebaseStat;
 
 /** Root shape if you read the whole DB; currently only `users` is used. */
 export interface FirebaseDatabase {
   users?: UsersMap;
+  stats?: StatsMap;
 }

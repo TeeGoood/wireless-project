@@ -11,14 +11,8 @@ function UsersIcon() {
   );
 }
 
-interface TotalUsersCardProps {
-  /** Override online count from Firebase when provided */
-  online?: number;
-}
-
-export function TotalUsersCard({ online }: TotalUsersCardProps) {
-  const { onlineCount, loading } = useDashboardFirebase();
-  const displayCount = typeof online === 'number' ? online : onlineCount;
+export function TotalUsersCard() {
+  const { loading, onlineCount } = useDashboardFirebase();
 
   return (
     <DashboardCard
@@ -26,7 +20,7 @@ export function TotalUsersCard({ online }: TotalUsersCardProps) {
       icon={<UsersIcon />}
     >
       <p className="text-2xl font-bold text-darkTeal">
-        {loading ? '…' : displayCount} Online Users
+        {loading ? '…' : onlineCount} Online Users
       </p>
       <p className="text-xs text-mutedTeal mt-3">
         If the status is not up to date, you may need to reload this page.
