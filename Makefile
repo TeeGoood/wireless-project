@@ -7,6 +7,11 @@ SERVICE ?= talksig
 SSHOPTS := -o ServerAliveInterval=60 -o ServerAliveCountMax=30
 REMOTE  := ssh $(SSHOPTS) $(PI) bash -lc
 
+# Prepend ~/.local/bin (where uv lives) before every remote command.
+# Needed the first time (uv just installed, ~/.profile not yet re-sourced)
+# and as a safety net on all subsequent calls.
+UV_PATH := export PATH="$$HOME/.local/bin:$$PATH";
+
 .PHONY: help sync deploy base rf24 service firstrun logs restart testkit shell status
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -53,13 +58,14 @@ sync:
 # ── First-time setup steps (all idempotent – safe to re-run individually) ────
 
 base: sync
-	$(REMOTE) "cd $(PI_DIR) && bash setup.sh"
+	$(REMOTE) "$(UV_PATH) bash $(PI_DIR)/setup.sh"
+	$(REMOTE) "grep -qF '.local/bin' ~/.profile || echo 'export PATH=\"\$$HOME/.local/bin:\$$PATH\"' >> ~/.profile"
 
 rf24:
-	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-rf24.sh"
+	$(REMOTE) "$(UV_PATH) bash $(PI_DIR)/scripts/install-rf24.sh"
 
 service:
-	$(REMOTE) "cd $(PI_DIR) && bash scripts/install-service.sh $(SERVICE)"
+	$(REMOTE) "$(UV_PATH) bash $(PI_DIR)/scripts/install-service.sh $(SERVICE)"
 
 # ── firstrun: all steps in order, each independently resumable ────────────────
 #
@@ -78,7 +84,7 @@ firstrun: base rf24 service
 # ── Day-to-day ────────────────────────────────────────────────────────────────
 
 deploy: sync
-	$(REMOTE) "cd $(PI_DIR) && uv sync --inexact"
+	$(REMOTE) "$(UV_PATH) uv --directory $(PI_DIR) sync --inexact"
 	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
 	@echo "✓ Deployed and restarted."
 
@@ -89,7 +95,7 @@ restart:
 	ssh $(SSHOPTS) $(PI) "sudo systemctl restart $(SERVICE)"
 
 testkit:
-	ssh $(SSHOPTS) -t $(PI) "cd $(PI_DIR) && uv run python testkit.py"
+	ssh $(SSHOPTS) -t $(PI) "$(UV_PATH) uv --directory $(PI_DIR) run python testkit.py"
 
 shell:
 	ssh -t $(PI)
