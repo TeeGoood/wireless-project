@@ -7,13 +7,19 @@ SERVICE ?= talksig
 
 # ── Local shortcuts ───────────────────────────────────────────────────────────
 
-.PHONY: help sync deploy service logs restart stop status shell
+.PHONY: help sync deploy service install logs restart stop status shell
 
 help:
 	@echo ""
+	@echo "  ── From your laptop (deploys to Pi over SSH) ──────────────────"
 	@echo "  make sync      rsync source files to the Pi (no restart)"
 	@echo "  make deploy    sync + install deps + restart service"
 	@echo "  make service   install / enable the systemd service (first time)"
+	@echo ""
+	@echo "  ── Run directly ON the Raspberry Pi ───────────────────────────"
+	@echo "  make install   bootstrap deps + install + enable systemd service"
+	@echo ""
+	@echo "  ── Remote helpers (SSH) ────────────────────────────────────────"
 	@echo "  make logs      tail live service logs"
 	@echo "  make restart   restart the service on the Pi"
 	@echo "  make stop      stop the service on the Pi"
@@ -34,6 +40,7 @@ sync:
 		--exclude '.python-version' \
 		--exclude 'firebase-key.json' \
 		--exclude 'uv.lock' \
+		--exclude '*/config.txt' \
 		raspi/ $(PI):$(PI_DIR)/
 	@echo ""
 	@echo "⚠  Remember to copy firebase-key.json manually if it changed:"
@@ -45,13 +52,40 @@ deploy: sync
 	ssh $(PI) "sudo systemctl restart $(SERVICE) 2>/dev/null || true"
 	@echo "✓ Deployed and restarted."
 
-# Install the systemd service for the first time
+# Install the systemd service (run from your laptop via SSH)
 service:
-	ssh $(PI) "cd $(PI_DIR) && sed 's|{{PI_DIR}}|$(PI_DIR)|g' talksig.service \
-		| sudo tee /etc/systemd/system/$(SERVICE).service > /dev/null \
+	ssh $(PI) "cd $(PI_DIR) && \
+		_user=\$$(whoami) && \
+		_uv=\$$(which uv 2>/dev/null || echo \$$HOME/.local/bin/uv) && \
+		sed \
+			-e 's|{{PI_DIR}}|$(PI_DIR)|g' \
+			-e \"s|{{USER}}|\$$_user|g\" \
+			-e \"s|{{UV_BIN}}|\$$_uv|g\" \
+			talksig.service \
+			| sudo tee /etc/systemd/system/$(SERVICE).service > /dev/null \
 		&& sudo systemctl daemon-reload \
 		&& sudo systemctl enable --now $(SERVICE)"
 	@echo "✓ Service enabled and started."
+
+# ── On-Pi install (run this directly on the Raspberry Pi) ────────────────────
+#
+#   cd ~/talksig && make install
+#
+install:
+	bash setup.sh
+	sed \
+		-e 's|{{PI_DIR}}|$(CURDIR)|g' \
+		-e 's|{{USER}}|$(shell whoami)|g' \
+		-e 's|{{UV_BIN}}|$(shell which uv 2>/dev/null || echo $(HOME)/.local/bin/uv)|g' \
+		talksig.service \
+		| sudo tee /etc/systemd/system/$(SERVICE).service > /dev/null
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now $(SERVICE)
+	@echo ""
+	@echo "✓ $(SERVICE) installed and started."
+	@echo "  Logs:    journalctl -u $(SERVICE) -f"
+	@echo "  Status:  systemctl status $(SERVICE)"
+	@echo ""
 
 # ── Remote helpers ────────────────────────────────────────────────────────────
 
