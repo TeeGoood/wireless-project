@@ -16,7 +16,7 @@ export function TotalUsersCard() {
 
   return (
     <DashboardCard
-      title="Total Users"
+      title="Online Users"
       icon={<UsersIcon />}
     >
       <p className="text-2xl font-bold text-darkTeal">
