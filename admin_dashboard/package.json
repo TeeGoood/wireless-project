@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "install:all": "npm install && cd functions && npm install",
+    "deploy:functions": "firebase deploy --only functions"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
