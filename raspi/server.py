@@ -272,6 +272,7 @@ async def _handle_client_event(ws: WebSocket, event: dict) -> None:
         case "beacon":
             manager.handle_beacon()
         case "getNearby":
+            manager.handle_beacon()
             await _broadcast(
                 {
                     "type": "nearbyList",
