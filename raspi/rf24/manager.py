@@ -441,12 +441,20 @@ class RF24Manager:
 
     # ── Messaging (requires active connection) ────────────────────────────────
 
+    def _extend_heartbeat_after_send(self) -> None:
+        """After we send to the peer, extend our heartbeat window so we don't
+        declare them dead while they're busy processing our message.
+        Backend-only: no change to WebSocket events; works with current frontend."""
+        self._last_pong_at = time.monotonic()
+
     def handle_send_text(self, text: str) -> None:
         if not self._assert_connected():
             return
         pkt = make_text(self._car_id, text[:26])
         if not self._driver.send(bytes.fromhex(self._peer), pkt):
             self._emit("messageFailed", {"kind": "text"})
+        else:
+            self._extend_heartbeat_after_send()
 
     def handle_send_sound(self, sound_id: int) -> None:
         if not self._assert_connected():
@@ -454,6 +462,8 @@ class RF24Manager:
         pkt = make_sound(self._car_id, sound_id)
         if not self._driver.send(bytes.fromhex(self._peer), pkt):
             self._emit("messageFailed", {"kind": "sound"})
+        else:
+            self._extend_heartbeat_after_send()
 
     def handle_send_honk(self) -> None:
         if not self._assert_connected():
@@ -461,6 +471,8 @@ class RF24Manager:
         pkt = make_honk(self._car_id)
         if not self._driver.send(bytes.fromhex(self._peer), pkt):
             self._emit("messageFailed", {"kind": "honk"})
+        else:
+            self._extend_heartbeat_after_send()
 
     def handle_send_ping(self) -> None:
         if not self._assert_connected():
@@ -657,6 +669,10 @@ class RF24Manager:
     def _rx_message(self, from_hex: str, kind: str, extra: dict) -> None:
         if not self._is_from_peer(from_hex):
             return  # Silently drop messages from non-peers
+        # Any traffic from peer (text/sound/honk) counts as liveness – avoids
+        # peerDisconnected when the other side is busy sending and misses our pings.
+        # Backend-only: payload unchanged (car_id, kind, text/etc); current frontend unchanged.
+        self._last_pong_at = time.monotonic()
         self._emit("messageReceived", {"car_id": from_hex, "kind": kind, **extra})
 
     # ── Helpers ───────────────────────────────────────────────────────────────
