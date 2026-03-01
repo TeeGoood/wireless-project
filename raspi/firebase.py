@@ -28,6 +28,11 @@ def set(ref_path, data):
     ref.set(data)
 
 
+def delete(ref_path):
+    ref = db.reference(ref_path)
+    ref.delete()
+
+
 def update(ref_path, data):
     ref = db.reference(ref_path)
     ref.update(data)
