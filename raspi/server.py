@@ -66,13 +66,21 @@ class OnlinePresence:
             logger.exception("Failed to register online presence on startup")
         self._task = asyncio.create_task(self._loop(), name="firebase-online-pusher")
 
+    def remove_old_online(self, ref_path: str) -> None:
+        """Remove old online presence entries from Firebase."""
+        try:
+            firebase.delete(ref_path)
+            logger.info("Removed old online presence at /%s", ref_path)
+        except Exception:
+            logger.exception("Failed to remove old online presence at /%s", ref_path)
+
     def stop(self) -> None:
         """Cancel the heartbeat and remove presence from Firebase."""
         if self._task:
             self._task.cancel()
             self._task = None
         try:
-            firebase.set(self._ref_path, None)
+            firebase.delete(self._ref_path)
             logger.info("Removed online presence at /%s", self._ref_path)
         except Exception:
             logger.exception("Failed to remove online presence on shutdown")
@@ -254,7 +262,9 @@ async def _handle_client_event(ws: WebSocket, event: dict) -> None:
 
     match t:
         case "changeInfo":
+            id = manager.get_info().get("car_id", "")
             manager.handle_change_info(p)
+            online_presence.remove_old_online(f"online/{id}")
         case "getInfo":
             await _broadcast({"type": "infoUpdated", "payload": manager.get_info()})
         case "scan":
