@@ -188,11 +188,23 @@ function renderNearby() {
   });
 }
 
+function escapeHtml(s) {
+  var div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
 function renderMessages() {
   var container = document.getElementById('conversation-messages');
   if (!app.messages.length) { container.innerHTML = ''; return; }
   container.innerHTML = app.messages.map(function (m) {
-    return '<div class="message-bubble">' + (m.text || m.kind) + '</div>';
+    var dir = m.direction === 'sent' ? 'sent' : 'received';
+    var text = (m.text || m.kind || '').toString();
+    var time = m.time || '';
+    return '<div class="msg msg-' + dir + '">' +
+      '<span class="msg-bubble">' + escapeHtml(text) + '</span>' +
+      (time ? '<span class="msg-time">' + escapeHtml(time) + '</span>' : '') +
+      '</div>';
   }).join('');
   container.scrollTop = container.scrollHeight;
 }
@@ -266,7 +278,11 @@ function onMessage(ev) {
       break;
     case 'messageReceived':
       if (p.kind === 'text' && p.text) {
-        app.messages.push({ text: p.text, from: p.car_id });
+        app.messages.push({
+          text: p.text,
+          direction: 'received',
+          time: new Date().toLocaleTimeString('en-GB', { hour12: false })
+        });
         renderMessages();
       }
       break;
@@ -371,7 +387,14 @@ document.getElementById('btn-edit-profile').addEventListener('click', function (
 document.querySelectorAll('.soundboard-grid button').forEach(function (btn) {
   btn.addEventListener('click', function () {
     var text = btn.textContent.trim();
-    if (text) send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
+    if (!text) return;
+    send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
+    app.messages.push({
+      text: text.slice(0, 26),
+      direction: 'sent',
+      time: new Date().toLocaleTimeString('en-GB', { hour12: false })
+    });
+    renderMessages();
   });
 });
 
@@ -380,6 +403,12 @@ document.getElementById('btn-send-chat').addEventListener('click', function () {
   var text  = input.value.trim();
   if (!text) return;
   send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
+  app.messages.push({
+    text: text.slice(0, 26),
+    direction: 'sent',
+    time: new Date().toLocaleTimeString('en-GB', { hour12: false })
+  });
+  renderMessages();
   input.value = '';
 });
 document.getElementById('chat-input').addEventListener('keydown', function (e) {
