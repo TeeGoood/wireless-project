@@ -130,6 +130,10 @@ class RF24Manager:
         self._ping_seq: int = 0
         self._ping_sent_at: float = 0.0
 
+        # Heartbeat keepalive ping sequence – separate from user pings so that
+        # heartbeat pings don't collide with (and corrupt) user ping/pong matching.
+        self._hb_seq: int = 0
+
         # Heartbeat liveness – tracks when the last pong arrived
         self._last_pong_at: float = 0.0
 
@@ -141,6 +145,7 @@ class RF24Manager:
         self._beacon_timer: Optional[threading.Timer] = None
         self._prune_timer: Optional[threading.Timer] = None
         self._conn_timer: Optional[threading.Timer] = None
+        self._pending_timer: Optional[threading.Timer] = None  # PENDING_ACCEPT guard
         self._heartbeat_timer: Optional[threading.Timer] = None
 
     # ── Startup / Shutdown ────────────────────────────────────────────────────
@@ -171,6 +176,7 @@ class RF24Manager:
         self._stop_beacon_timer()
         self._stop_prune_timer()
         self._stop_conn_timer()
+        self._stop_pending_timer()
         self._stop_heartbeat()
         if self._driver:
             self._driver.stop()
@@ -296,7 +302,9 @@ class RF24Manager:
         if not car_id_hex:
             self._emit("error", {"message": "car_id is required"})
             return
-        if car_id_hex not in self._nearby:
+        with self._nearby_lock:
+            in_nearby = car_id_hex in self._nearby
+        if not in_nearby:
             self._emit("error", {"message": f"Car {car_id_hex} not in scan results. Run scan first."})
             return
         with self._state_lock:
@@ -336,6 +344,7 @@ class RF24Manager:
             self._peer = car_id_hex
             self._peer_nonce = b"\x00\x00"
 
+        self._stop_pending_timer()
         pkt = make_conn_accept(self._car_id)
         self._driver.send(bytes.fromhex(car_id_hex), pkt)
 
@@ -349,14 +358,18 @@ class RF24Manager:
     def handle_reject_connection(self, car_id_hex: str) -> None:
         """Reject a pending incoming connection request."""
         with self._state_lock:
+            if self._state != ConnectionState.PENDING_ACCEPT:
+                return  # Nothing to reject; stale UI event, ignore safely
+            peer = self._peer   # Use stored peer (set by _rx_conn_request), not arg
             self._state = ConnectionState.IDLE
             self._peer = None
             nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
 
+        self._stop_pending_timer()
         pkt = make_conn_reject(self._car_id, nonce)
-        self._driver.send(bytes.fromhex(car_id_hex), pkt)
-        self._emit("connectionRejected", {"car_id": car_id_hex})
-        logger.info("Connection rejected ← %s", car_id_hex)
+        self._driver.send(bytes.fromhex(peer), pkt)
+        self._emit("connectionRejected", {"car_id": peer})
+        logger.info("Connection rejected ← %s", peer)
 
     def handle_disconnect(self) -> None:
         """Cancel a pending connection request or tear down an active connection.
@@ -413,6 +426,38 @@ class RF24Manager:
         self._emit("error", {"message": f"Connection to {peer} timed out (no response in {self.CONN_TIMEOUT:.0f}s)"})
         logger.info("CONN_TIMEOUT → %s", peer)
 
+    # ── Pending-accept timeout ─────────────────────────────────────────────────
+
+    def _start_pending_timer(self) -> None:
+        self._stop_pending_timer()
+        self._pending_timer = threading.Timer(self.CONN_TIMEOUT, self._on_pending_timeout)
+        self._pending_timer.daemon = True
+        self._pending_timer.start()
+
+    def _stop_pending_timer(self) -> None:
+        if self._pending_timer:
+            self._pending_timer.cancel()
+            self._pending_timer = None
+
+    def _on_pending_timeout(self) -> None:
+        """Auto-reject a CONN_REQUEST if the user takes too long to respond.
+
+        Protects against the car getting stuck in PENDING_ACCEPT forever when
+        the initiator's follow-up CONN_REJECT (sent by their own timeout handler)
+        is lost over the radio.
+        """
+        with self._state_lock:
+            if self._state != ConnectionState.PENDING_ACCEPT:
+                return
+            peer = self._peer
+            nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
+            self._state = ConnectionState.IDLE
+            self._peer = None
+        if peer and self._driver:
+            self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
+        self._emit("connectionCancelled", {"car_id": peer})
+        logger.info("PENDING_ACCEPT timeout – auto-rejected %s", peer)
+
     # ── Heartbeat / keepalive ─────────────────────────────────────────────────
 
     def _start_heartbeat(self) -> None:
@@ -445,10 +490,11 @@ class RF24Manager:
             )
             return
 
-        # Send a keepalive ping and reschedule
-        self._ping_seq = (self._ping_seq + 1) % 0x10000
-        self._ping_sent_at = time.monotonic()
-        pkt = make_ping(self._car_id, self._ping_seq)
+        # Send a keepalive ping and reschedule.
+        # Uses _hb_seq (not _ping_seq) so heartbeat pings don't interfere with
+        # user-initiated ping/pong latency tracking.
+        self._hb_seq = (self._hb_seq + 1) % 0x10000
+        pkt = make_ping(self._car_id, self._hb_seq)
         self._driver.send(bytes.fromhex(peer), pkt)
 
         self._heartbeat_timer = threading.Timer(self.HEARTBEAT_INTERVAL, self._heartbeat_tick)
@@ -464,46 +510,55 @@ class RF24Manager:
         self._last_pong_at = time.monotonic()
 
     def handle_send_text(self, text: str) -> None:
-        if not self._assert_connected():
+        peer = self._assert_connected()
+        if not peer:
             return
         pkt = make_text(self._car_id, text[:26])
-        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+        if not self._driver.send(bytes.fromhex(peer), pkt):
             self._emit("messageFailed", {"kind": "text"})
         else:
             self._extend_heartbeat_after_send()
 
     def handle_send_sound(self, sound_id: int) -> None:
-        if not self._assert_connected():
+        peer = self._assert_connected()
+        if not peer:
             return
         pkt = make_sound(self._car_id, sound_id)
-        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+        if not self._driver.send(bytes.fromhex(peer), pkt):
             self._emit("messageFailed", {"kind": "sound"})
         else:
             self._extend_heartbeat_after_send()
 
     def handle_send_honk(self) -> None:
-        if not self._assert_connected():
+        peer = self._assert_connected()
+        if not peer:
             return
         pkt = make_honk(self._car_id)
-        if not self._driver.send(bytes.fromhex(self._peer), pkt):
+        if not self._driver.send(bytes.fromhex(peer), pkt):
             self._emit("messageFailed", {"kind": "honk"})
         else:
             self._extend_heartbeat_after_send()
 
     def handle_send_ping(self) -> None:
-        if not self._assert_connected():
+        peer = self._assert_connected()
+        if not peer:
             return
         self._ping_seq = (self._ping_seq + 1) % 0x10000
         self._ping_sent_at = time.monotonic()
         pkt = make_ping(self._car_id, self._ping_seq)
-        self._driver.send(bytes.fromhex(self._peer), pkt)
+        self._driver.send(bytes.fromhex(peer), pkt)
 
-    def _assert_connected(self) -> bool:
+    def _assert_connected(self) -> Optional[str]:
+        """Return the peer hex string if connected, None otherwise.
+
+        The peer is captured inside the lock so callers get a valid snapshot
+        that won't become None even if handle_disconnect() fires concurrently.
+        """
         with self._state_lock:
-            ok = self._state == ConnectionState.CONNECTED
-        if not ok:
-            self._emit("error", {"message": "Not connected to any car"})
-        return ok
+            if self._state == ConnectionState.CONNECTED:
+                return self._peer
+        self._emit("error", {"message": "Not connected to any car"})
+        return None
 
     # ── Raw receive dispatch ──────────────────────────────────────────────────
 
@@ -578,6 +633,9 @@ class RF24Manager:
             "car_id": from_hex,
             "plate": info.get("plate", from_hex),
         })
+        # Guard: if the user never responds (and the initiator's CONN_REJECT is
+        # lost over the radio), we'll auto-reject after CONN_TIMEOUT seconds.
+        self._start_pending_timer()
         logger.info("CONN_REQUEST received ← %s (nonce=%s)", from_hex, nonce.hex())
 
     def _rx_conn_accept(self, from_hex: str) -> None:
@@ -640,6 +698,9 @@ class RF24Manager:
             self._stop_conn_timer()
         elif prev_state == ConnectionState.CONNECTED:
             self._stop_heartbeat()
+        else:
+            # PENDING_ACCEPT cancellation – stop the pending timeout guard
+            self._stop_pending_timer()
 
         self._emit(event, {"car_id": from_hex})
         logger.info("CONN_REJECT received ← %s → %s", from_hex, event)
