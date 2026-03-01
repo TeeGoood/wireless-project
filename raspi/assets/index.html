@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Talksig Road</title>
+  <link rel="stylesheet" href="/web/talksig-road.css" />
+</head>
+<body>
+  <!-- Page 1: User Log In -->
+  <section id="page-login" class="page active">
+    <span class="page-label">User Log In</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="form-card">
+      <h3><span class="info-icon">i</span> Enter Your Information</h3>
+      <div class="form-row">
+        <label for="name">Your Name:</label>
+        <input type="text" id="name" value="Jimmy" />
+      </div>
+      <div class="form-row">
+        <label for="car-model">Car Model:</label>
+        <input type="text" id="car-model" value="Toyota" />
+      </div>
+      <div class="form-row">
+        <label for="car-colour">Car Colour:</label>
+        <input type="text" id="car-colour" value="Black" />
+      </div>
+      <div class="form-row">
+        <label for="license">License Plate:</label>
+        <input type="text" id="license" value="1 AA 2000" />
+      </div>
+      <button type="button" class="btn-confirm">Confirm</button>
+    </div>
+  </section>
+
+  <!-- Page 2: User Control Panel -->
+  <section id="page-control" class="page">
+    <span class="page-label">User Control Panel</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="two-col">
+      <div class="left-col">
+        <div class="card">
+          <div class="card-header"><span class="icon">i</span> General Info</div>
+          <ul class="info-list" id="general-info-list">
+            <li>Signal Range: 15 meters</li>
+            <li>Status: <span class="status-active" id="general-status">—</span></li>
+            <li>Your License Plate: <span id="general-plate">—</span></li>
+            <li>Your Car: <span id="general-car">—</span></li>
+          </ul>
+          <button type="button" class="btn-edit" id="btn-edit-profile">✎ Edit Profile</button>
+        </div>
+      </div>
+      <div class="right-col">
+        <div class="card">
+          <div class="card-header">↻ Incoming Connection Requests</div>
+          <div id="incoming-requests-container"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">⊞ Available Connections <span class="icon icon-refresh" id="btn-refresh-nearby" title="Refresh">↻</span></div>
+          <div id="nearby-list-container"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Page 3: User Soundboard -->
+  <section id="page-soundboard" class="page">
+    <span class="page-label">User Soundboard</span>
+    <h1 class="page-title">Talksig Road</h1>
+    <hr />
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><span class="icon">i</span> Soundboard</div>
+        <div class="soundboard-grid">
+          <button type="button">สวัสดี</button>
+          <button type="button">ช่วยเคลื่อนรถไป</button>
+          <button type="button">ข้างหน้า</button>
+          <button type="button">ข้างหลัง</button>
+          <button type="button">ซ้าย</button>
+          <button type="button">ขวา</button>
+          <button type="button">เทียบกับ</button>
+          <button type="button">ฉัน</button>
+          <button type="button">คุณ</button>
+          <button type="button">เลี้ยว</button>
+          <button type="button">ถอย</button>
+          <button type="button">ไป</button>
+          <button type="button">โอเค</button>
+          <button type="button">ไม่</button>
+          <button type="button">ใช่</button>
+        </div>
+        <button type="button" class="btn-disconnect" id="btn-disconnect">Disconnect</button>
+      </div>
+      <div class="card conversation-panel">
+        <div class="card-header">🕐 <span id="conversation-title">Conversation</span></div>
+        <div id="conversation-messages"></div>
+        <hr />
+        <div class="conversation-input">
+          <input type="text" id="chat-input" placeholder="Type a message (max 26 chars)" maxlength="26" />
+          <button type="button" class="btn-send-chat" id="btn-send-chat" title="Send">▶</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <!-- ── Debug panel (bottom-right corner; press ` to toggle) ─────────────── -->
+  <div id="debug-panel">
+    <div id="debug-toolbar">
+      <span><span id="debug-ws-status"></span>WS Debug</span>
+      <div>
+        <button id="debug-btn-clear" title="Clear log">Clear</button>
+        <button id="debug-btn-close" title="Hide panel">✕</button>
+      </div>
+    </div>
+    <div id="debug-log"></div>
+  </div>
+  <button id="debug-toggle" title="Show debug panel">⬛ Debug</button>
+
+  <script src="/web/talksig-road.js"></script>
+  <!--
+    REMOVED INLINE SCRIPT — now in talksig-road.js
+    Original inline script is kept below only as a reference comment.
+    // ── WebSocket URL (same host as page, /ws; fallback for file://)
+    var wsHost = (location.hostname && location.hostname !== '') ? location.host : 'localhost:8000';
+    var wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + wsHost + '/ws';
+
+-->
+</body>
+</html>

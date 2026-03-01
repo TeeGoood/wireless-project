@@ -170,7 +170,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Car RF24 Gateway", lifespan=lifespan)
-app.mount("/web", StaticFiles(directory=".", html=True), name="static")
+app.mount("/web", StaticFiles(directory="assets", html=True), name="static")
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ app.mount("/web", StaticFiles(directory=".", html=True), name="static")
 
 @app.get("/")
 async def root():
-    return FileResponse("index.html")
+    return FileResponse("assets/index.html")
 
 
 class User(pydantic.BaseModel):
