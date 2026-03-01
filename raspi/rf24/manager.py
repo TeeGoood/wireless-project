@@ -89,10 +89,10 @@ class ConnectionState(Enum):
 class RF24Manager:
     """Coordinates RF24 radio, car metadata, and WebSocket event delivery."""
 
-    BEACON_INTERVAL    = 2.0   # base seconds between periodic beacons while scanning
-    BEACON_JITTER      = 1.0   # max random seconds added to each beacon interval
-    NEARBY_TTL         = 15.0  # seconds of silence before a car is removed from nearby
-    NEARBY_PRUNE_EVERY = 7.5   # how often the TTL pruner runs (NEARBY_TTL / 2)
+    BEACON_INTERVAL    = 1.0   # base seconds between periodic beacons
+    BEACON_JITTER      = 0.5   # max random seconds added to each beacon interval
+    NEARBY_TTL         = 5.0   # seconds of silence before a car is removed from nearby
+    NEARBY_PRUNE_EVERY = 2.5   # how often the TTL pruner runs (NEARBY_TTL / 2)
     HEARTBEAT_INTERVAL = 3.0   # seconds between keepalive pings while connected
     HEARTBEAT_TIMEOUT  = 9.0   # seconds without a pong → declare peer lost
     CONN_TIMEOUT       = 10.0  # seconds to wait for CONN_ACCEPT before giving up
@@ -104,6 +104,7 @@ class RF24Manager:
         self._driver: Optional[RF24Driver] = None
         self._state = ConnectionState.IDLE
         self._state_lock = threading.Lock()
+        self._nearby_lock = threading.Lock()
 
         # Discovered cars: hex_car_id → {plate, color, model, owner, _seen_at}
         # _seen_at is an internal float (time.monotonic) used for TTL pruning.
@@ -162,6 +163,8 @@ class RF24Manager:
         # without requiring a manual scan command first.
         self._send_beacon()
         self._schedule_beacon()
+        # Always-on nearby pruner – removes out-of-range cars automatically.
+        self._start_prune_timer()
         logger.info("RF24Manager started | car_id=%s", self._car_id.hex())
 
     def stop(self) -> None:
@@ -192,10 +195,11 @@ class RF24Manager:
 
     def get_nearby(self) -> list[dict]:
         # Strip the internal _seen_at key before returning to callers
-        return [
-            {"car_id": cid, **{k: v for k, v in info.items() if not k.startswith("_")}}
-            for cid, info in self._nearby.items()
-        ]
+        with self._nearby_lock:
+            return [
+                {"car_id": cid, **{k: v for k, v in info.items() if not k.startswith("_")}}
+                for cid, info in self._nearby.items()
+            ]
 
     def get_state(self) -> str:
         return self._state.value
@@ -211,10 +215,21 @@ class RF24Manager:
 
         The presence beacon is already running (started at server boot), so
         scan mode only needs to enable carDiscovered events and the TTL pruner.
+        Re-emits carDiscovered for all cars already in the nearby list so the
+        UI is always in sync when scan is called more than once.
         """
         with self._state_lock:
             self._state = ConnectionState.SCANNING
         self._emit("scanStarted", {})
+        # Re-announce all currently-known cars so the UI is never out of sync
+        # on a repeated scan call.
+        with self._nearby_lock:
+            existing = [
+                {"car_id": cid, **{k: v for k, v in info.items() if not k.startswith("_")}}
+                for cid, info in self._nearby.items()
+            ]
+        for entry in existing:
+            self._emit("carDiscovered", entry)
         self._start_prune_timer()
         logger.info("Scan started")
 
@@ -257,12 +272,14 @@ class RF24Manager:
 
     def _prune_tick(self) -> None:
         now = time.monotonic()
-        expired = [
-            cid for cid, info in self._nearby.items()
-            if now - info.get("_seen_at", now) > self.NEARBY_TTL
-        ]
+        with self._nearby_lock:
+            expired = [
+                cid for cid, info in self._nearby.items()
+                if now - info.get("_seen_at", now) > self.NEARBY_TTL
+            ]
+            for cid in expired:
+                del self._nearby[cid]
         for cid in expired:
-            del self._nearby[cid]
             self._emit("carExpired", {"car_id": cid})
             logger.info("Car expired (TTL=%.0fs) %s", self.NEARBY_TTL, cid)
         self._start_prune_timer()  # Reschedule
@@ -291,9 +308,8 @@ class RF24Manager:
                 self._emit("error", {"message": "Already in a connection. Disconnect first."})
                 return
             self._state = ConnectionState.CONNECTING
-
-        self._peer = car_id_hex
-        self._conn_nonce = os.urandom(2)
+            self._peer = car_id_hex
+            self._conn_nonce = os.urandom(2)
 
         pkt = make_conn_request(self._car_id, self._conn_nonce)
         ok = self._driver.send(bytes.fromhex(car_id_hex), pkt)
@@ -301,8 +317,8 @@ class RF24Manager:
             # TX failed immediately – the car is likely out of range
             with self._state_lock:
                 self._state = ConnectionState.IDLE
-            self._peer = None
-            self._conn_nonce = b"\x00\x00"
+                self._peer = None
+                self._conn_nonce = b"\x00\x00"
             self._emit("error", {"message": f"Car {car_id_hex} is out of range (TX failed)"})
             return
 
@@ -317,8 +333,8 @@ class RF24Manager:
                 self._emit("error", {"message": "No pending connection to accept"})
                 return
             self._state = ConnectionState.CONNECTED
-        self._peer = car_id_hex
-        self._peer_nonce = b"\x00\x00"
+            self._peer = car_id_hex
+            self._peer_nonce = b"\x00\x00"
 
         pkt = make_conn_accept(self._car_id)
         self._driver.send(bytes.fromhex(car_id_hex), pkt)
@@ -334,8 +350,8 @@ class RF24Manager:
         """Reject a pending incoming connection request."""
         with self._state_lock:
             self._state = ConnectionState.IDLE
-        self._peer = None
-        nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
+            self._peer = None
+            nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
 
         pkt = make_conn_reject(self._car_id, nonce)
         self._driver.send(bytes.fromhex(car_id_hex), pkt)
@@ -356,7 +372,8 @@ class RF24Manager:
             if state not in (ConnectionState.CONNECTING, ConnectionState.CONNECTED):
                 return
             self._state = ConnectionState.IDLE
-        self._peer = None
+            self._peer = None
+            nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
         self._stop_conn_timer()
         self._stop_heartbeat()
 
@@ -364,7 +381,6 @@ class RF24Manager:
             if state == ConnectionState.CONNECTED:
                 self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
             else:  # CONNECTING – cancel; echo our nonce so Car B can verify the cancel
-                nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
                 self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
 
         self._emit("disconnected", {})
@@ -389,8 +405,8 @@ class RF24Manager:
                 return
             peer = self._peer
             self._state = ConnectionState.IDLE
-        self._peer = None
-        nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
+            self._peer = None
+            nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
         # Notify the peer that we gave up so it can clean up its state
         if peer and self._driver:
             self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
@@ -421,7 +437,7 @@ class RF24Manager:
         if time.monotonic() - self._last_pong_at > self.HEARTBEAT_TIMEOUT:
             with self._state_lock:
                 self._state = ConnectionState.IDLE
-            self._peer = None
+                self._peer = None
             self._emit("peerDisconnected", {"car_id": peer})
             logger.info(
                 "Heartbeat timeout (%.0fs) – peer %s declared lost",
@@ -430,7 +446,7 @@ class RF24Manager:
             return
 
         # Send a keepalive ping and reschedule
-        self._ping_seq = (self._ping_seq + 1) % 0xFFFF
+        self._ping_seq = (self._ping_seq + 1) % 0x10000
         self._ping_sent_at = time.monotonic()
         pkt = make_ping(self._car_id, self._ping_seq)
         self._driver.send(bytes.fromhex(peer), pkt)
@@ -477,7 +493,7 @@ class RF24Manager:
     def handle_send_ping(self) -> None:
         if not self._assert_connected():
             return
-        self._ping_seq = (self._ping_seq + 1) % 0xFFFF
+        self._ping_seq = (self._ping_seq + 1) % 0x10000
         self._ping_sent_at = time.monotonic()
         pkt = make_ping(self._car_id, self._ping_seq)
         self._driver.send(bytes.fromhex(self._peer), pkt)
@@ -527,13 +543,16 @@ class RF24Manager:
     def _rx_beacon(self, from_hex: str, pkt: RFPacket) -> None:
         info = parse_beacon(pkt)
         now = time.monotonic()
-        if from_hex not in self._nearby:
-            self._nearby[from_hex] = {**info, "_seen_at": now}
+        with self._nearby_lock:
+            is_new = from_hex not in self._nearby
+            if is_new:
+                self._nearby[from_hex] = {**info, "_seen_at": now}
+            else:
+                # Refresh TTL and update plate (may have changed via setinfo)
+                self._nearby[from_hex].update({**info, "_seen_at": now})
+        if is_new:
             self._emit("carDiscovered", {"car_id": from_hex, **info})
             logger.info("Discovered car %s (plate=%s)", from_hex, info.get("plate"))
-        else:
-            # Refresh TTL and update plate (may have changed via setinfo)
-            self._nearby[from_hex].update({**info, "_seen_at": now})
 
     def _rx_conn_request(self, from_hex: str, pkt: RFPacket) -> None:
         nonce = parse_conn_nonce(pkt)
@@ -547,14 +566,14 @@ class RF24Manager:
                 )
                 return
             self._state = ConnectionState.PENDING_ACCEPT
+            # Store the requester and their nonce inside the lock so that:
+            #   • _rx_conn_reject can detect if they cancel before we accept
+            #   • handle_reject_connection can echo the right nonce back
+            self._peer       = from_hex
+            self._peer_nonce = nonce
 
-        # Store the requester and their nonce so that:
-        #   • _rx_conn_reject can detect if they cancel before we accept
-        #   • handle_reject_connection can echo the right nonce back
-        self._peer       = from_hex
-        self._peer_nonce = nonce
-
-        info = self._nearby.get(from_hex, {})
+        with self._nearby_lock:
+            info = dict(self._nearby.get(from_hex, {}))
         self._emit("connectionRequest", {
             "car_id": from_hex,
             "plate": info.get("plate", from_hex),
@@ -608,6 +627,11 @@ class RF24Manager:
                 prev_state = ConnectionState.CONNECTED
                 self._state = ConnectionState.IDLE
 
+            if event is not None:
+                self._peer       = None
+                self._conn_nonce = b"\x00\x00"
+                self._peer_nonce = b"\x00\x00"
+
         if event is None:
             return
 
@@ -617,9 +641,6 @@ class RF24Manager:
         elif prev_state == ConnectionState.CONNECTED:
             self._stop_heartbeat()
 
-        self._peer       = None
-        self._conn_nonce = b"\x00\x00"
-        self._peer_nonce = b"\x00\x00"
         self._emit(event, {"car_id": from_hex})
         logger.info("CONN_REJECT received ← %s → %s", from_hex, event)
 
@@ -628,18 +649,27 @@ class RF24Manager:
             if self._peer != from_hex:
                 return  # Not our current peer – ignore stale packet
             self._state = ConnectionState.IDLE
-        self._peer = None
+            self._peer = None
         self._stop_heartbeat()
         self._emit("peerDisconnected", {"car_id": from_hex})
         logger.info("Peer disconnected ← %s", from_hex)
 
     def _rx_info(self, from_hex: str, pkt: RFPacket) -> None:
         info = parse_info(pkt)
-        if from_hex not in self._nearby:
-            self._nearby[from_hex] = {}
-        self._nearby[from_hex].update(info)
+        now = time.monotonic()
+        with self._nearby_lock:
+            if from_hex not in self._nearby:
+                # INFO arrived before a beacon – create a stub entry so metadata
+                # is not lost, and mark _seen_at so TTL pruning works correctly.
+                self._nearby[from_hex] = {"_seen_at": now}
+                emit_discovered = True
+            else:
+                emit_discovered = False
+            self._nearby[from_hex].update(info)
+            public = {k: v for k, v in self._nearby[from_hex].items() if not k.startswith("_")}
+        if emit_discovered:
+            self._emit("carDiscovered", {"car_id": from_hex, **public})
         # Expose only non-internal keys to the UI
-        public = {k: v for k, v in self._nearby[from_hex].items() if not k.startswith("_")}
         self._emit("carInfoUpdated", {"car_id": from_hex, **public})
 
     def _rx_ping(self, from_hex: str, pkt: RFPacket) -> None:
