@@ -372,28 +372,39 @@ class RF24Manager:
         logger.info("Connection rejected ← %s", peer)
 
     def handle_disconnect(self) -> None:
-        """Cancel a pending connection request or tear down an active connection.
+        """Cancel any in-flight connection state or tear down an active connection.
 
-        Works from both CONNECTING and CONNECTED states:
-          CONNECTING → sends CONN_REJECT so the remote car knows the attempt
-                       is cancelled before it has a chance to accept.
-          CONNECTED  → sends CONN_CLOSE as before.
+        Handled states:
+          PENDING_ACCEPT → we received a request but haven't responded; sends
+                           CONN_REJECT so the initiator can clean up immediately.
+          CONNECTING     → we sent a request; sends CONN_REJECT (with our nonce)
+                           so the remote car knows the attempt is withdrawn.
+          CONNECTED      → sends CONN_CLOSE for a clean teardown.
+
+        IDLE / SCANNING → no-op (nothing to cancel).
         """
         with self._state_lock:
             state = self._state
             peer  = self._peer
-            if state not in (ConnectionState.CONNECTING, ConnectionState.CONNECTED):
-                return
+            if state == ConnectionState.PENDING_ACCEPT:
+                nonce, self._peer_nonce = self._peer_nonce, b"\x00\x00"
+                self._conn_nonce = b"\x00\x00"
+            elif state in (ConnectionState.CONNECTING, ConnectionState.CONNECTED):
+                nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
+                self._peer_nonce = b"\x00\x00"
+            else:
+                return  # IDLE / SCANNING – nothing to cancel
             self._state = ConnectionState.IDLE
-            self._peer = None
-            nonce, self._conn_nonce = self._conn_nonce, b"\x00\x00"
+            self._peer  = None
+
         self._stop_conn_timer()
+        self._stop_pending_timer()
         self._stop_heartbeat()
 
         if peer and self._driver:
             if state == ConnectionState.CONNECTED:
                 self._driver.send(bytes.fromhex(peer), make_conn_close(self._car_id))
-            else:  # CONNECTING – cancel; echo our nonce so Car B can verify the cancel
+            else:  # CONNECTING or PENDING_ACCEPT – both signal cancellation via CONN_REJECT
                 self._driver.send(bytes.fromhex(peer), make_conn_reject(self._car_id, nonce))
 
         self._emit("disconnected", {})
