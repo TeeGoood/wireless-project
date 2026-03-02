@@ -194,6 +194,13 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function playSound(soundId) {
+  var audio = new Audio('/web/soundboards/' + soundId + '.mp3');
+  audio.play().catch(function (e) {
+    dbg('error', 'Audio play failed for sound_id=' + soundId + ': ' + e.message);
+  });
+}
+
 function renderMessages() {
   var container = document.getElementById('conversation-messages');
   if (!app.messages.length) { container.innerHTML = ''; return; }
@@ -278,6 +285,8 @@ function onMessage(ev) {
       break;
     case 'messageReceived':
       if (p.kind === 'text' && p.text) {
+        console.log('Message received:', p);
+        playSound(p.text)
         app.messages.push({
           text: p.text,
           direction: 'received',
@@ -386,8 +395,10 @@ document.getElementById('btn-edit-profile').addEventListener('click', function (
 // ── Soundboard: phrase buttons → sendText ─────────────────────────────────────
 document.querySelectorAll('.soundboard-grid button').forEach(function (btn) {
   btn.addEventListener('click', function () {
+    var soundId = btn.getAttribute('data-sound-id') || 's0';
     var text = btn.textContent.trim();
-    if (!text) return;
+    console.log('Button clicked:', { soundId: soundId, text: text });
+    if (!soundId) return;
     send({ type: 'sendText', payload: { text: text.slice(0, 26) } });
     app.messages.push({
       text: text.slice(0, 26),
