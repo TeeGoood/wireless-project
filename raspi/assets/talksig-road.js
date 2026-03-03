@@ -247,6 +247,22 @@ function renderNearby() {
   });
 }
 
+function escapeHtml(s) {
+  var div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function playSound(soundId) {
+  var audio = new Audio("/web/soundboards/" + soundId + ".mp3");
+  audio.play().catch(function (e) {
+    dbg(
+      "error",
+      "Audio play failed for sound_id=" + soundId + ": " + e.message,
+    );
+  });
+}
+
 function renderMessages() {
   var container = document.getElementById("conversation-messages");
   if (!app.messages.length) {
@@ -255,7 +271,19 @@ function renderMessages() {
   }
   container.innerHTML = app.messages
     .map(function (m) {
-      return '<div class="message-bubble">' + (m.text || m.kind) + "</div>";
+      var dir = m.direction === "sent" ? "sent" : "received";
+      var text = (m.text || m.kind || "").toString();
+      var time = m.time || "";
+      return (
+        '<div class="msg msg-' +
+        dir +
+        '">' +
+        '<span class="msg-bubble">' +
+        escapeHtml(text) +
+        "</span>" +
+        (time ? '<span class="msg-time">' + escapeHtml(time) + "</span>" : "") +
+        "</div>"
+      );
     })
     .join("");
   container.scrollTop = container.scrollHeight;
@@ -357,7 +385,13 @@ function onMessage(ev) {
       break;
     case "messageReceived":
       if (p.kind === "text" && p.text) {
-        app.messages.push({ text: p.text, from: p.car_id });
+        console.log("Message received:", p);
+        playSound(p.text);
+        app.messages.push({
+          text: p.text,
+          direction: "received",
+          time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+        });
         renderMessages();
       }
       break;
@@ -486,8 +520,17 @@ document
 // ── Soundboard: phrase buttons → sendText ─────────────────────────────────────
 document.querySelectorAll(".soundboard-grid button").forEach(function (btn) {
   btn.addEventListener("click", function () {
+    var soundId = btn.getAttribute("data-sound-id") || "s0";
     var text = btn.textContent.trim();
-    if (text) send({ type: "sendText", payload: { text: text.slice(0, 26) } });
+    console.log("Button clicked:", { soundId: soundId, text: text });
+    if (!soundId) return;
+    send({ type: "sendText", payload: { text: text.slice(0, 26) } });
+    app.messages.push({
+      text: text.slice(0, 26),
+      direction: "sent",
+      time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+    });
+    renderMessages();
   });
 });
 
@@ -496,6 +539,12 @@ document.getElementById("btn-send-chat").addEventListener("click", function () {
   var text = input.value.trim();
   if (!text) return;
   send({ type: "sendText", payload: { text: text.slice(0, 26) } });
+  app.messages.push({
+    text: text.slice(0, 26),
+    direction: "sent",
+    time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+  });
+  renderMessages();
   input.value = "";
 });
 document.getElementById("chat-input").addEventListener("keydown", function (e) {

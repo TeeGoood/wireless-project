@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Talksig Road</title>
+  <title>Talksig Car</title>
   <link rel="stylesheet" href="/web/talksig-road.css" />
 </head>
 <body>
   <!-- Page 1: User Log In -->
   <section id="page-login" class="page active">
-    <span class="page-label">User Log In</span>
-    <h1 class="page-title">Talksig Road</h1>
+    <h1 class="page-title">Talksig Car</h1>
     <hr />
     <div class="form-card">
       <h3><span class="info-icon">i</span> Enter Your Information</h3>
@@ -36,8 +35,7 @@
 
   <!-- Page 2: User Control Panel -->
   <section id="page-control" class="page">
-    <span class="page-label">User Control Panel</span>
-    <h1 class="page-title">Talksig Road</h1>
+    <h1 class="page-title">Talksig Car</h1>
     <hr />
     <div class="two-col">
       <div class="left-col">
@@ -67,34 +65,34 @@
 
   <!-- Page 3: User Soundboard -->
   <section id="page-soundboard" class="page">
-    <span class="page-label">User Soundboard</span>
-    <h1 class="page-title">Talksig Road</h1>
+    <h1 class="page-title">Talksig Car</h1>
     <hr />
     <div class="two-col">
       <div class="card">
         <div class="card-header"><span class="icon">i</span> Soundboard</div>
         <div class="soundboard-grid">
-          <button type="button">สวัสดี</button>
-          <button type="button">ช่วยเคลื่อนรถไป</button>
-          <button type="button">ข้างหน้า</button>
-          <button type="button">ข้างหลัง</button>
-          <button type="button">ซ้าย</button>
-          <button type="button">ขวา</button>
-          <button type="button">เทียบกับ</button>
-          <button type="button">ฉัน</button>
-          <button type="button">คุณ</button>
-          <button type="button">เลี้ยว</button>
-          <button type="button">ถอย</button>
-          <button type="button">ไป</button>
-          <button type="button">โอเค</button>
-          <button type="button">ไม่</button>
-          <button type="button">ใช่</button>
+          <button type="button" data-sound-id="สวัสดี">สวัสดี</button>
+          <button type="button" data-sound-id="ช่วยเคลื่อนรถไป">ช่วยเคลื่อนรถไป</button>
+          <button type="button" data-sound-id="ข้างหน้า">ข้างหน้า</button>
+          <button type="button" data-sound-id="ข้างหลัง">ข้างหลัง</button>
+          <button type="button" data-sound-id="ซ้าย">ซ้าย</button>
+          <button type="button" data-sound-id="ขวา">ขวา</button>
+          <button type="button" data-sound-id="เทียบกับ">เทียบกับ</button>
+          <button type="button" data-sound-id="ฉัน">ฉัน</button>
+          <button type="button" data-sound-id="คุณ">คุณ</button>
+          <button type="button" data-sound-id="เลี้ยว">เลี้ยว</button>
+          <button type="button" data-sound-id="ถอย">ถอย</button>
+          <button type="button" data-sound-id="ไป">ไป</button>
+          <button type="button" data-sound-id="โอเค">โอเค</button>
+          <button type="button" data-sound-id="ไม่">ไม่</button>
+          <button type="button" data-sound-id="ใช่">ใช่</button>
+          <button type="button" data-sound-id="🎁">🎁</button>
         </div>
         <button type="button" class="btn-disconnect" id="btn-disconnect">Disconnect</button>
       </div>
       <div class="card conversation-panel">
         <div class="card-header">🕐 <span id="conversation-title">Conversation</span></div>
-        <div id="conversation-messages"></div>
+        <div id="conversation-messages" class="conversation-messages" role="log" aria-label="Chat messages"></div>
         <hr />
         <div class="conversation-input">
           <input type="text" id="chat-input" placeholder="Type a message (max 26 chars)" maxlength="26" />

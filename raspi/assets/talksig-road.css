@@ -250,13 +250,51 @@ body {
   cursor: pointer;
   text-align: center;
 }
-.conversation-panel .message-bubble {
+/* Conversation: Line-style chat – received left, sent right */
+#conversation-messages {
+  min-height: 100px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+#conversation-messages .msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 82%;
+  align-items: flex-start;
+}
+#conversation-messages .msg-sent {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+#conversation-messages .msg-received {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+#conversation-messages .msg-bubble {
+  padding: 0.5rem 0.85rem;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+#conversation-messages .msg-sent .msg-bubble {
   background: #8fa89e;
   color: #fff;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  font-size: 0.95rem;
+  border-bottom-right-radius: 4px;
+}
+#conversation-messages .msg-received .msg-bubble {
+  background: #e8e8e8;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+#conversation-messages .msg-time {
+  font-size: 0.68rem;
+  color: #888;
+  margin-top: 0.15rem;
 }
 .conversation-panel hr {
   border: none;
@@ -288,7 +326,6 @@ body {
   cursor: pointer;
   font-size: 0.9rem;
 }
-#conversation-messages { min-height: 80px; }
 
 /* ── Toast notification ─────────────────────────────────────────────────────── */
 .toast {
