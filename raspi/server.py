@@ -110,6 +110,7 @@ class EventStats:
         self._manager = rf24_manager
         self._counts: dict[str, int] = {}
         self._sounds: dict[str, int] = {}
+        self._texts: dict[str, int] = {}
 
     @property
     def _ref_path(self) -> str:
@@ -121,9 +122,12 @@ class EventStats:
             data = firebase.get(self._ref_path)
             if isinstance(data, dict):
                 sounds = data.pop("sounds", None)
+                texts = data.pop("texts", None)
                 self._counts = {k: int(v) for k, v in data.items()}
                 if isinstance(sounds, dict):
                     self._sounds = {k: int(v) for k, v in sounds.items()}
+                if isinstance(texts, dict):
+                    self._texts = {k: int(v) for k, v in texts.items()}
             logger.info("Loaded event stats from /%s: %s", self._ref_path, self._counts)
         except Exception:
             logger.exception("Failed to load event stats from Firebase")
@@ -142,9 +146,16 @@ class EventStats:
         self._sounds[key] = self._sounds.get(key, 0) + 1
         self._push()
 
+    def record_text(self, text: str) -> None:
+        """Increment the counter for a specific text message."""
+        if not text:
+            return
+        self._texts[text] = self._texts.get(text, 0) + 1
+        self._push()
+
     def _push(self) -> None:
         try:
-            payload = {**self._counts, "sounds": self._sounds}
+            payload = {**self._counts, "sounds": self._sounds, "texts": self._texts}
             firebase.set(self._ref_path, payload)
             logger.info("Updated event stats at /%s: %s", self._ref_path, self._counts)
         except Exception:
@@ -288,7 +299,9 @@ async def _handle_client_event(ws: WebSocket, event: dict) -> None:
         case "disconnect":
             manager.handle_disconnect()
         case "sendText":
-            manager.handle_send_text(str(p.get("text", "")))
+            text = str(p.get("text", ""))
+            manager.handle_send_text(text)
+            event_stats.record_text(text)
         case "sendSound":
             sound_id = int(p.get("sound_id", 0))
             manager.handle_send_sound(sound_id)

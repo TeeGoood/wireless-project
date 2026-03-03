@@ -8,17 +8,19 @@ interface FirebaseUser {
 }
 
 interface FirebaseStat {
-  connect:number;
-  error:number;
-  getInfo:number;
-  sendSound:number;
+  connect: number;
+  error: number;
+  getInfo: number;
+  sendSound: number;
+  sendText: number;
   sounds: Record<string, number>;
+  texts: Record<string, number>;
 }
 
 export type UsersMap = Record<string, FirebaseUser>;
 
 export type StatsMap = Record<string, FirebaseStat>;
-export type StatsStruct = FirebaseStat & { maxSound: number };
+export type StatsStruct = FirebaseStat & { maxSound: number; maxText: number };
 
 /** Root shape if you read the whole DB; currently only `users` is used. */
 export interface FirebaseDatabase {
