@@ -39,6 +39,9 @@ function initDebugPanel() {
   debugLog = document.getElementById("debug-log");
   debugStatus = document.getElementById("debug-ws-status");
 
+  debugEl.classList.add("hidden");
+  document.getElementById("debug-toggle").style.display = "block";
+
   document
     .getElementById("debug-btn-clear")
     .addEventListener("click", function () {
