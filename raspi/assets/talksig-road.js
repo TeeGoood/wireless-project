@@ -570,4 +570,3 @@ document
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initDebugPanel();
 connect();
-showPage("soundboard");
