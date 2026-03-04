@@ -61,7 +61,7 @@ class OnlinePresence:
         """Register presence immediately and start the background heartbeat."""
         try:
             firebase.set(self._ref_path, self._build_payload())
-            logger.info("Registered online presence at /%s", self._ref_path)
+            logger.debug("Registered online presence at /%s", self._ref_path)
         except Exception:
             logger.exception("Failed to register online presence on startup")
         self._task = asyncio.create_task(self._loop(), name="firebase-online-pusher")
@@ -70,7 +70,7 @@ class OnlinePresence:
         """Remove old online presence entries from Firebase."""
         try:
             firebase.delete(ref_path)
-            logger.info("Removed old online presence at /%s", ref_path)
+            logger.debug("Removed old online presence at /%s", ref_path)
         except Exception:
             logger.exception("Failed to remove old online presence at /%s", ref_path)
 
@@ -81,7 +81,7 @@ class OnlinePresence:
             self._task = None
         try:
             firebase.delete(self._ref_path)
-            logger.info("Removed online presence at /%s", self._ref_path)
+            logger.debug("Removed online presence at /%s", self._ref_path)
         except Exception:
             logger.exception("Failed to remove online presence on shutdown")
 
@@ -90,7 +90,7 @@ class OnlinePresence:
             await asyncio.sleep(self._interval)
             try:
                 firebase.set(self._ref_path, self._build_payload())
-                logger.info("Updated online presence at /%s", self._ref_path)
+                logger.debug("Updated online presence at /%s", self._ref_path)
             except Exception:
                 logger.exception("Failed to update online presence in Firebase")
 
@@ -157,7 +157,7 @@ class EventStats:
         try:
             payload = {**self._counts, "sounds": self._sounds, "texts": self._texts}
             firebase.set(self._ref_path, payload)
-            logger.info("Updated event stats at /%s: %s", self._ref_path, self._counts)
+            logger.debug("Updated event stats at /%s: %s", self._ref_path, self._counts)
         except Exception:
             logger.exception("Failed to push event stats to Firebase")
 
@@ -269,7 +269,7 @@ async def websocket_user_endpoint(websocket: WebSocket, username: str):
 async def _handle_client_event(ws: WebSocket, event: dict) -> None:
     t = event.get("type")
     p = event.get("payload", {})
-    event_stats.record(event)
+    asyncio.create_task(asyncio.to_thread(event_stats.record, event))
 
     match t:
         case "changeInfo":
@@ -322,7 +322,10 @@ async def _event_forwarder() -> None:
     """Drain the RF24 event queue and fan out to all WebSocket clients."""
     while True:
         event = await event_queue.get()
-        event_stats.record(event)
+        # Run the synchronous Firebase push in a thread so it never blocks
+        # the event loop – a slow Firebase response would otherwise delay
+        # peerDisconnected and other critical events from reaching the UI.
+        asyncio.create_task(asyncio.to_thread(event_stats.record, event))
         await _broadcast(event)
 
 

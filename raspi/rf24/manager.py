@@ -560,6 +560,8 @@ class RF24Manager:
         # Declare peer lost if we haven't heard from them recently
         if time.monotonic() - self._last_pong_at > self.HEARTBEAT_TIMEOUT:
             with self._state_lock:
+                if self._state != ConnectionState.CONNECTED or self._peer != peer:
+                    return  # Already handled by disconnect/close on another thread
                 self._state = ConnectionState.IDLE
                 self._peer = None
             self._heartbeat_timer = None
@@ -571,23 +573,14 @@ class RF24Manager:
             )
             return
 
-        # Send a keepalive ping (with rapid retries to survive packet loss)
+        # Send a single keepalive ping per interval.
+        # Both sides heartbeat each other, so the bilateral design already
+        # provides natural redundancy – no rapid retries needed, and retries
+        # longer than HEARTBEAT_INTERVAL only create overlapping threads that
+        # flood the radio channel and starve pong reception.
         self._hb_seq = (self._hb_seq + 1) % 0xFFFF
         pkt = make_ping(self._car_id, self._hb_seq)
         self._driver.send(bytes.fromhex(peer), pkt)
-
-        # Fire a few rapid retries so at least one ping gets through even
-        # if the first one collides with the peer's simultaneous TX.
-        def _retries():
-            for _ in range(self.HEARTBEAT_RETRIES):
-                time.sleep(self.HEARTBEAT_RETRY_MS)
-                with self._state_lock:
-                    if self._state != ConnectionState.CONNECTED or self._peer != peer:
-                        return
-                self._driver.send(bytes.fromhex(peer), pkt)
-
-        retry_thread = threading.Thread(target=_retries, daemon=True, name="hb-retry")
-        retry_thread.start()
 
         self._heartbeat_timer = threading.Timer(
             self.HEARTBEAT_INTERVAL, self._heartbeat_tick
@@ -842,9 +835,10 @@ class RF24Manager:
             if self._is_from_peer(from_hex):
                 self._driver.send(bytes.fromhex(from_hex), pong_pkt)
         threading.Thread(target=_delayed_pong, daemon=True, name="pong-retry").start()
-        # A ping from the peer proves they are alive
+        # A ping from the peer proves they are alive.
+        # No UI event here – pings are internal heartbeat probes; the sender
+        # already gets latency feedback via the pong event on their side.
         self._refresh_peer_liveness()
-        self._emit("messageReceived", {"car_id": from_hex, "kind": "ping"})
 
     def _rx_pong(self, from_hex: str, pkt: RFPacket) -> None:
         if not self._is_from_peer(from_hex):
